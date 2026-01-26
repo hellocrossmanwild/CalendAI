@@ -90,9 +90,12 @@ function AppContent() {
     );
   }
 
-  // Show auth page if not authenticated
-  if (!isAuthenticated) {
-    return <AuthPage />;
+  // Auth-related routes (accessible without login)
+  const authPaths = ["/auth", "/auth/verify-email", "/auth/magic-link", "/auth/reset-password"];
+  if (!isAuthenticated || authPaths.some(p => window.location.pathname.startsWith(p))) {
+    if (!isAuthenticated) {
+      return <AuthPage />;
+    }
   }
 
   return <AuthenticatedRoutes />;

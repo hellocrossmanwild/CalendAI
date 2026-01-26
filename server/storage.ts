@@ -1,8 +1,8 @@
 import { db } from "./db";
-import { eq, and, desc, gte, asc } from "drizzle-orm";
+import { eq, and, desc, gte, asc, lt } from "drizzle-orm";
 import {
   type User,
-  type InsertUser,
+  type UpsertUser,
   type EventType,
   type InsertEventType,
   type Booking,
@@ -25,14 +25,31 @@ import {
   meetingBriefs,
   calendarTokens,
 } from "@shared/schema";
-import { users } from "@shared/models/auth";
+import { users, passwordResetTokens, magicLinkTokens, emailVerificationTokens } from "@shared/models/auth";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(userData: { username: string; password: string; firstName?: string | null; lastName?: string | null }): Promise<User>;
-  upsertUser(user: InsertUser): Promise<User>;
-  
+  getUserByEmail(email: string): Promise<User | undefined>;
+  createUser(userData: { email: string; password: string; firstName?: string | null; lastName?: string | null }): Promise<User>;
+  updateUser(id: string, data: Partial<UpsertUser>): Promise<User | undefined>;
+  upsertUser(user: UpsertUser): Promise<User>;
+
+  // Password reset tokens
+  createPasswordResetToken(userId: string, token: string, expiresAt: Date): Promise<void>;
+  getPasswordResetToken(token: string): Promise<{ id: number; userId: string; token: string; expiresAt: Date; used: boolean | null } | undefined>;
+  markPasswordResetTokenUsed(id: number): Promise<void>;
+
+  // Magic link tokens
+  createMagicLinkToken(email: string, token: string, expiresAt: Date): Promise<void>;
+  getMagicLinkToken(token: string): Promise<{ id: number; email: string; token: string; expiresAt: Date; used: boolean | null } | undefined>;
+  markMagicLinkTokenUsed(id: number): Promise<void>;
+
+  // Email verification tokens
+  createEmailVerificationToken(userId: string, token: string, expiresAt: Date): Promise<void>;
+  getEmailVerificationToken(token: string): Promise<{ id: number; userId: string; token: string; expiresAt: Date; used: boolean | null } | undefined>;
+  markEmailVerificationTokenUsed(id: number): Promise<void>;
+
   getEventTypes(userId: string): Promise<EventType[]>;
   getEventType(id: number): Promise<EventType | undefined>;
   getEventTypeBySlug(slug: string): Promise<EventType | undefined>;
@@ -79,12 +96,22 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async createUser(userData: { username: string; password: string; firstName?: string | null; lastName?: string | null }): Promise<User> {
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+    return user;
+  }
+
+  async createUser(userData: { email: string; password: string; firstName?: string | null; lastName?: string | null }): Promise<User> {
     const [user] = await db.insert(users).values(userData).returning();
     return user;
   }
 
-  async upsertUser(userData: InsertUser): Promise<User> {
+  async updateUser(id: string, data: Partial<UpsertUser>): Promise<User | undefined> {
+    const [user] = await db.update(users).set({ ...data, updatedAt: new Date() }).where(eq(users.id, id)).returning();
+    return user;
+  }
+
+  async upsertUser(userData: UpsertUser): Promise<User> {
     const [user] = await db
       .insert(users)
       .values(userData)
@@ -276,6 +303,48 @@ export class DatabaseStorage implements IStorage {
 
   async deleteCalendarToken(userId: string): Promise<void> {
     await db.delete(calendarTokens).where(eq(calendarTokens.userId, userId));
+  }
+
+  // Password reset tokens
+  async createPasswordResetToken(userId: string, token: string, expiresAt: Date): Promise<void> {
+    await db.insert(passwordResetTokens).values({ userId, token, expiresAt });
+  }
+
+  async getPasswordResetToken(token: string) {
+    const [row] = await db.select().from(passwordResetTokens).where(eq(passwordResetTokens.token, token)).limit(1);
+    return row;
+  }
+
+  async markPasswordResetTokenUsed(id: number): Promise<void> {
+    await db.update(passwordResetTokens).set({ used: true }).where(eq(passwordResetTokens.id, id));
+  }
+
+  // Magic link tokens
+  async createMagicLinkToken(email: string, token: string, expiresAt: Date): Promise<void> {
+    await db.insert(magicLinkTokens).values({ email, token, expiresAt });
+  }
+
+  async getMagicLinkToken(token: string) {
+    const [row] = await db.select().from(magicLinkTokens).where(eq(magicLinkTokens.token, token)).limit(1);
+    return row;
+  }
+
+  async markMagicLinkTokenUsed(id: number): Promise<void> {
+    await db.update(magicLinkTokens).set({ used: true }).where(eq(magicLinkTokens.id, id));
+  }
+
+  // Email verification tokens
+  async createEmailVerificationToken(userId: string, token: string, expiresAt: Date): Promise<void> {
+    await db.insert(emailVerificationTokens).values({ userId, token, expiresAt });
+  }
+
+  async getEmailVerificationToken(token: string) {
+    const [row] = await db.select().from(emailVerificationTokens).where(eq(emailVerificationTokens.token, token)).limit(1);
+    return row;
+  }
+
+  async markEmailVerificationTokenUsed(id: number): Promise<void> {
+    await db.update(emailVerificationTokens).set({ used: true }).where(eq(emailVerificationTokens.id, id));
   }
 }
 
