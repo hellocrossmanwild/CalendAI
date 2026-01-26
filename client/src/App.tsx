@@ -21,6 +21,7 @@ import LeadsPage from "@/pages/leads";
 import BriefsPage from "@/pages/briefs";
 import SettingsPage from "@/pages/settings";
 import BookPage from "@/pages/book";
+import OnboardingPage from "@/pages/onboarding";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   const style = {
@@ -96,6 +97,11 @@ function AppContent() {
     if (!isAuthenticated) {
       return <AuthPage />;
     }
+  }
+
+  // Onboarding page renders outside sidebar layout but requires auth
+  if (window.location.pathname === "/onboarding") {
+    return <OnboardingPage />;
   }
 
   return <AuthenticatedRoutes />;

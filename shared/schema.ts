@@ -93,6 +93,30 @@ export const meetingBriefs = pgTable("meeting_briefs", {
   generatedAt: timestamp("generated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+// Availability Rules - configurable working hours per user
+export const availabilityRules = pgTable("availability_rules", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().unique(),
+  timezone: text("timezone").notNull().default("UTC"),
+  weeklyHours: jsonb("weekly_hours").$type<{
+    [day: string]: { start: string; end: string }[] | null;
+  }>().default({
+    monday: [{ start: "09:00", end: "17:00" }],
+    tuesday: [{ start: "09:00", end: "17:00" }],
+    wednesday: [{ start: "09:00", end: "17:00" }],
+    thursday: [{ start: "09:00", end: "17:00" }],
+    friday: [{ start: "09:00", end: "17:00" }],
+    saturday: null,
+    sunday: null,
+  }),
+  minNotice: integer("min_notice").default(1440),        // minutes (default 24h)
+  maxAdvance: integer("max_advance").default(60),         // days (default 60)
+  defaultBufferBefore: integer("default_buffer_before").default(0),
+  defaultBufferAfter: integer("default_buffer_after").default(0),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 // Google Calendar Tokens - OAuth storage
 export const calendarTokens = pgTable("calendar_tokens", {
   id: serial("id").primaryKey(),
@@ -182,6 +206,12 @@ export const insertMeetingBriefSchema = createInsertSchema(meetingBriefs).omit({
   generatedAt: true,
 });
 
+export const insertAvailabilityRulesSchema = createInsertSchema(availabilityRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export const insertCalendarTokenSchema = createInsertSchema(calendarTokens).omit({
   id: true,
   createdAt: true,
@@ -206,6 +236,9 @@ export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 
 export type MeetingBrief = typeof meetingBriefs.$inferSelect;
 export type InsertMeetingBrief = z.infer<typeof insertMeetingBriefSchema>;
+
+export type AvailabilityRules = typeof availabilityRules.$inferSelect;
+export type InsertAvailabilityRules = z.infer<typeof insertAvailabilityRulesSchema>;
 
 export type CalendarToken = typeof calendarTokens.$inferSelect;
 export type InsertCalendarToken = z.infer<typeof insertCalendarTokenSchema>;

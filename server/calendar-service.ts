@@ -46,9 +46,11 @@ const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
 ];
 
-const WORKING_HOURS_START = 9; // 9 AM
-const WORKING_HOURS_END = 17; // 5 PM
+const DEFAULT_WORKING_HOURS_START = 9; // 9 AM
+const DEFAULT_WORKING_HOURS_END = 17; // 5 PM
 const SLOT_INTERVAL_MINUTES = 30;
+
+const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
 function createOAuth2Client(redirectUri?: string): OAuth2Client {
   return new google.auth.OAuth2(
@@ -227,12 +229,14 @@ export async function getCalendarEvents(
  * Calculate available time slots for a given event type on a given date.
  *
  * 1. Fetches the event type to read duration / buffer settings.
- * 2. Fetches Google Calendar events for the date (if connected).
- * 3. Fetches existing CalendAI bookings for the date.
- * 4. Generates 30-minute interval slots during working hours (9 AM – 5 PM).
- * 5. Marks slots as unavailable when they overlap with existing events or
+ * 2. Fetches the host's availability rules (or falls back to defaults).
+ * 3. Checks if the requested date is within min notice and max advance limits.
+ * 4. Fetches Google Calendar events for the date (if connected).
+ * 5. Fetches existing CalendAI bookings for the date.
+ * 6. Generates slots within configured working hours for the day of the week.
+ * 7. Marks slots as unavailable when they overlap with existing events or
  *    bookings (buffers included).
- * 6. Filters out slots in the past.
+ * 8. Filters out slots in the past and those within min notice period.
  */
 export async function calculateAvailability(
   userId: string,
@@ -250,7 +254,43 @@ export async function calculateAvailability(
     const bufferBefore = eventType.bufferBefore ?? 0;
     const bufferAfter = eventType.bufferAfter ?? 0;
 
+    // Fetch availability rules for the host (F03)
+    const rules = await storage.getAvailabilityRules(userId);
+    const minNotice = rules?.minNotice ?? 1440; // default 24 hours
+    const maxAdvance = rules?.maxAdvance ?? 60;  // default 60 days
+
+    const now = new Date();
     const dayStart = startOfDay(date);
+
+    // Check max advance limit: if the requested date is too far in the future
+    const maxAdvanceDate = addMinutes(startOfDay(now), maxAdvance * 24 * 60);
+    if (isAfter(dayStart, maxAdvanceDate)) {
+      return [];
+    }
+
+    // Determine the day of the week and look up configured hours
+    const dayOfWeek = DAY_NAMES[date.getDay()]; // 0=sunday, 1=monday, etc.
+    const weeklyHours = rules?.weeklyHours as {
+      [day: string]: { start: string; end: string }[] | null;
+    } | null;
+
+    let timeBlocks: { start: string; end: string }[];
+    if (weeklyHours && dayOfWeek in weeklyHours) {
+      const dayConfig = weeklyHours[dayOfWeek];
+      if (dayConfig === null || dayConfig === undefined) {
+        // Day is disabled (e.g., weekends)
+        return [];
+      }
+      timeBlocks = dayConfig;
+    } else {
+      // Fallback to default working hours
+      timeBlocks = [{ start: `${String(DEFAULT_WORKING_HOURS_START).padStart(2, "0")}:00`, end: `${String(DEFAULT_WORKING_HOURS_END).padStart(2, "0")}:00` }];
+    }
+
+    if (timeBlocks.length === 0) {
+      return [];
+    }
+
     const dayEnd = endOfDay(date);
 
     // Fetch external calendar events and internal bookings in parallel.
@@ -273,47 +313,60 @@ export async function calculateAvailability(
       })),
     ];
 
-    const now = new Date();
+    // Calculate minimum notice cutoff
+    const minNoticeCutoff = addMinutes(now, minNotice);
+
     const slots: TimeSlot[] = [];
 
-    // Generate candidate slots from working-hours start to end.
-    const workStart = setMinutes(setHours(dayStart, WORKING_HOURS_START), 0);
-    const workEnd = setMinutes(setHours(dayStart, WORKING_HOURS_END), 0);
+    // Generate candidate slots for each time block in the day
+    for (const block of timeBlocks) {
+      const [startHour, startMin] = block.start.split(":").map(Number);
+      const [endHour, endMin] = block.end.split(":").map(Number);
 
-    let cursor = workStart;
+      const blockStart = setMinutes(setHours(dayStart, startHour), startMin);
+      const blockEnd = setMinutes(setHours(dayStart, endHour), endMin);
 
-    while (isBefore(cursor, workEnd)) {
-      const slotStart = cursor;
-      const slotEnd = addMinutes(slotStart, duration);
+      let cursor = blockStart;
 
-      // The slot must finish within working hours.
-      if (isAfter(slotEnd, workEnd)) {
-        break;
-      }
+      while (isBefore(cursor, blockEnd)) {
+        const slotStart = cursor;
+        const slotEnd = addMinutes(slotStart, duration);
 
-      // Skip slots that are in the past.
-      if (isBefore(slotStart, now)) {
+        // The slot must finish within this block's working hours.
+        if (isAfter(slotEnd, blockEnd)) {
+          break;
+        }
+
+        // Skip slots that are in the past.
+        if (isBefore(slotStart, now)) {
+          cursor = addMinutes(cursor, SLOT_INTERVAL_MINUTES);
+          continue;
+        }
+
+        // Skip slots within minimum notice period
+        if (isBefore(slotStart, minNoticeCutoff)) {
+          cursor = addMinutes(cursor, SLOT_INTERVAL_MINUTES);
+          continue;
+        }
+
+        // Determine availability by checking overlaps with busy periods,
+        // accounting for buffers around the proposed slot.
+        const bufferedStart = addMinutes(slotStart, -bufferBefore);
+        const bufferedEnd = addMinutes(slotEnd, bufferAfter);
+
+        const hasConflict = busyPeriods.some((busy) => {
+          // Two intervals overlap when one starts before the other ends and
+          // vice-versa.
+          return isBefore(bufferedStart, busy.end) && isAfter(bufferedEnd, busy.start);
+        });
+
+        slots.push({
+          time: format(slotStart, "h:mm a"),
+          available: !hasConflict,
+        });
+
         cursor = addMinutes(cursor, SLOT_INTERVAL_MINUTES);
-        continue;
       }
-
-      // Determine availability by checking overlaps with busy periods,
-      // accounting for buffers around the proposed slot.
-      const bufferedStart = addMinutes(slotStart, -bufferBefore);
-      const bufferedEnd = addMinutes(slotEnd, bufferAfter);
-
-      const hasConflict = busyPeriods.some((busy) => {
-        // Two intervals overlap when one starts before the other ends and
-        // vice-versa.
-        return isBefore(bufferedStart, busy.end) && isAfter(bufferedEnd, busy.start);
-      });
-
-      slots.push({
-        time: format(slotStart, "h:mm a"),
-        available: !hasConflict,
-      });
-
-      cursor = addMinutes(cursor, SLOT_INTERVAL_MINUTES);
     }
 
     return slots;

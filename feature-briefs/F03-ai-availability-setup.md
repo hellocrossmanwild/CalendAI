@@ -24,25 +24,30 @@
 
 ---
 
-## Current State
+## Current State — IMPLEMENTED
 
-This feature does not exist at all. There is:
+All five requirements (R1-R5) are fully implemented.
 
-- No onboarding wizard or setup flow after signup
-- No calendar analysis logic
-- No AI-driven availability suggestions
-- No availability rules configuration
-- Availability is calculated via `calculateAvailability()` in `server/calendar-service.ts`, which checks Google Calendar events and CalendAI bookings against default 9am-5pm working hours with buffer support. However, there are no configurable availability rules — the 9am-5pm hours and 30-minute intervals are hardcoded constants.
-- No working hours, excluded days, or lunch breaks stored anywhere
+### What Was Built
 
-### What's Missing vs PRD
+1. **Availability rules data model (R1)** — `availability_rules` table in `shared/schema.ts` with timezone, weeklyHours (JSONB), minNotice, maxAdvance, defaultBufferBefore, defaultBufferAfter. Storage CRUD in `server/storage.ts` with upsert support.
+2. **AI calendar pattern analysis (R2)** — `analyseCalendarPatterns()` in `server/ai-service.ts` fetches 4 weeks of Google Calendar events and uses GPT-4o to detect working hours, recurring breaks, and suggest optimal availability settings.
+3. **Onboarding wizard (R3)** — `client/src/pages/onboarding.tsx` with 4-step flow: Connect Calendar → AI Analysis → Review & Edit Availability → Confirmation. Visual weekly schedule editor with day toggles, time pickers, smart break insertion, timezone selection, and min notice / max advance configuration.
+4. **Slot generation uses stored rules (R4)** — `calculateAvailability()` in `server/calendar-service.ts` now reads availability rules from storage, supports multiple time blocks per day, enforces min notice and max advance limits, and falls back to Mon-Fri 9-5 defaults when no rules exist.
+5. **Settings availability section (R5)** — Availability card in `client/src/pages/settings.tsx` with inline editing per day, time picker dropdowns (24h internally), toggle days, add/remove breaks, timezone selector, min notice & max advance dropdowns, and save functionality.
+6. **API endpoints** — `GET /api/availability-rules`, `PUT /api/availability-rules` (with HH:MM and range validation), `POST /api/availability-rules/analyse`.
 
-1. **Post-signup onboarding flow** — AI-guided setup wizard
-2. **Calendar pattern analysis** — scan connected calendar to detect working hours, busy patterns
-3. **AI suggestions** — "It looks like you're typically available Mon-Fri 9-5..."
-4. **Availability rules model** — store working hours, excluded days, lunch breaks, etc.
-5. **Manual override** — user can adjust AI-suggested availability
-6. **Availability rules applied to slot generation** — use stored rules instead of hardcoded hours
+### Files Created
+- `client/src/pages/onboarding.tsx`
+
+### Files Modified
+- `shared/schema.ts` — added `availabilityRules` table, insert schema, types
+- `server/storage.ts` — added `getAvailabilityRules()` and `upsertAvailabilityRules()` to interface + implementation
+- `server/routes.ts` — added 3 availability-rules API endpoints with validation
+- `server/ai-service.ts` — added `analyseCalendarPatterns()`, `AvailabilitySuggestions` interface, `getDefaultSuggestions()`
+- `server/calendar-service.ts` — rewrote `calculateAvailability()` to use stored rules with multi-block support
+- `client/src/App.tsx` — added `/onboarding` route (renders outside sidebar layout, requires auth)
+- `client/src/pages/settings.tsx` — added Availability card with weekly editor
 
 ---
 
@@ -162,16 +167,16 @@ POST   /api/availability-rules/analyse → Trigger AI analysis of calendar (retu
 
 ## Acceptance Criteria
 
-- [ ] Availability rules are stored per user (timezone, weekly hours, min notice, max advance, buffers)
-- [ ] After signup, user sees onboarding wizard prompting calendar connection
-- [ ] AI analyses connected calendar and suggests working hours
-- [ ] User can review and adjust AI suggestions before saving
-- [ ] Visual weekly schedule editor lets user set hours per day
-- [ ] Public availability endpoint uses stored rules instead of hardcoded 9-5
-- [ ] Minimum notice period is enforced (e.g., can't book within 24 hours)
-- [ ] Maximum advance booking is enforced
-- [ ] Settings page includes availability configuration section
-- [ ] If no availability rules set, defaults to Mon-Fri 9am-5pm
+- [x] Availability rules are stored per user (timezone, weekly hours, min notice, max advance, buffers)
+- [x] After signup, user sees onboarding wizard prompting calendar connection
+- [x] AI analyses connected calendar and suggests working hours
+- [x] User can review and adjust AI suggestions before saving
+- [x] Visual weekly schedule editor lets user set hours per day
+- [x] Public availability endpoint uses stored rules instead of hardcoded 9-5
+- [x] Minimum notice period is enforced (e.g., can't book within 24 hours)
+- [x] Maximum advance booking is enforced
+- [x] Settings page includes availability configuration section
+- [x] If no availability rules set, defaults to Mon-Fri 9am-5pm
 
 ---
 
