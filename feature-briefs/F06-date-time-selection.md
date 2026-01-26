@@ -2,7 +2,7 @@
 
 **Priority:** Critical
 **Estimated Scope:** Medium
-**Dependencies:** F02 (Calendar Connection for real availability), F03 (Availability Rules)
+**Dependencies:** F02 (Calendar Connection for real availability) — **SATISFIED**, F03 (Availability Rules)
 
 ---
 
@@ -11,21 +11,39 @@
 - **No direct dependency on F01**. This feature is primarily about availability calculation and slot management.
 - **User authentication is in place** — authenticated endpoints for host-side configuration are ready.
 
+### Impact from F02 Implementation
+
+F02 has satisfied several of F06's requirements. Here is what is now done:
+
+- **R1 (Double-Booking Prevention): DONE** — `calculateAvailability()` checks both Google Calendar events and CalendAI bookings. Write-time prevention added to `POST /api/public/book` returns HTTP 409 on conflict. `getBookingsByDateRange()` storage method exists.
+- **R2 (Buffer Time Enforcement): DONE** — `calculateAvailability()` applies `bufferBefore` (subtracts from slot start) and `bufferAfter` (adds to slot end) from event type configuration.
+- **R6 (Slot Duration from Event Type): DONE** — `calculateAvailability()` uses `eventType.duration` for slot length, not hardcoded 30 minutes. Slot intervals are still 30 minutes.
+- **Calendar integration: DONE** — `getCalendarEvents()` fetches Google Calendar events for conflict checking.
+- **Client timezone accepted** — `POST /api/public/book` now accepts `timezone` from request body instead of using server timezone.
+
+**What remains for F06:**
+- **R3 (Timezone Handling):** Full timezone conversion between host and booker timezones. Availability endpoint needs `timezone` query param. Display timezone on booking page.
+- **R4 (Minimum Notice Period):** Not yet enforced. Depends on F03 availability rules or a default value.
+- **R5 (Maximum Advance Booking):** Not yet enforced. Depends on F03 availability rules or a default value.
+- **R7 (Real-Time Availability):** Periodic refresh or optimistic UI not yet implemented.
+- **Frontend updates:** Timezone detection/display on booking page.
+
 ---
 
 ## Current State
 
-The availability and time selection system is minimal:
+The availability and time selection system has been significantly improved by F02:
 
-- **Availability API:** `GET /api/public/availability/:slug` generates hardcoded 9am-5pm, 30-minute interval slots (`server/routes.ts:343-378`)
-- **All slots return `available: true`** — no checking against existing bookings or calendar events
-- **Past time filtering:** Slots before current time are excluded (`server/routes.ts:363-366`)
-- **Frontend:** Week-view calendar + time slot grid (`client/src/pages/book.tsx:288-382`)
-- **No timezone handling:** Server uses `Intl.DateTimeFormat().resolvedOptions().timeZone` (server timezone), not booker's timezone
-- **No buffer enforcement:** Buffer before/after fields exist on event types but are ignored in slot generation
-- **No double-booking prevention:** Multiple bookers can select and confirm the same time slot
-- **No minimum notice period:** Can book any future time within the same day
-- **No maximum advance booking:** Can book arbitrarily far into the future
+- **Availability API:** `GET /api/public/availability/:slug` now calls `calculateAvailability()` from `server/calendar-service.ts`, which checks Google Calendar events and CalendAI bookings against 9am-5pm working hours with buffer support
+- **Slots reflect real availability** — busy periods from Google Calendar and existing CalendAI bookings are excluded
+- **Buffer enforcement:** `bufferBefore` and `bufferAfter` from event types are applied when checking for conflicts
+- **Double-booking prevention at write time:** `POST /api/public/book` checks for conflicts before creating a booking (HTTP 409 on conflict)
+- **Past time filtering:** Slots before current time are excluded
+- **Client timezone:** `POST /api/public/book` accepts `timezone` from request body (no longer uses server timezone)
+- **Frontend:** Week-view calendar + time slot grid (`client/src/pages/book.tsx`)
+- **No timezone conversion:** Availability still generated in server timezone, not booker's timezone
+- **No minimum notice period:** Can still book any future time within the same day
+- **No maximum advance booking:** Can still book arbitrarily far into the future
 
 ### What's Missing vs PRD
 
@@ -43,6 +61,8 @@ The availability and time selection system is minimal:
 ## Requirements
 
 ### R1: Double-Booking Prevention (Backend)
+
+> **Status: DONE (implemented in F02).** `calculateAvailability()` in `server/calendar-service.ts` checks CalendAI bookings and Google Calendar events. `POST /api/public/book` includes write-time conflict check returning HTTP 409. `getBookingsByDateRange()` exists in storage.
 
 This is the highest priority item and can be done independently of F02/F03.
 
@@ -70,6 +90,8 @@ Also add a check at booking creation time (`POST /api/public/book`):
 - If not, return 409 Conflict with message "This time slot is no longer available"
 
 ### R2: Buffer Time Enforcement
+
+> **Status: DONE (implemented in F02).** `calculateAvailability()` applies `bufferBefore` (subtracts from slot start) and `bufferAfter` (adds to slot end) from event type configuration when checking for overlaps.
 
 When generating available slots:
 1. Load the event type's `bufferBefore` and `bufferAfter` values
@@ -116,6 +138,8 @@ When generating available slots:
 
 ### R6: Slot Duration from Event Type
 
+> **Status: PARTIALLY DONE (implemented in F02).** `calculateAvailability()` uses `eventType.duration` for slot length. Slot start intervals are still fixed at 30 minutes (`SLOT_INTERVAL_MINUTES = 30` in `calendar-service.ts`). May need adjustment for 15-minute event types.
+
 - Currently hardcoded to 30-minute intervals
 - Use event type's `duration` field to determine slot length
 - E.g., 15-minute event type shows more slots; 60-minute shows fewer
@@ -156,7 +180,7 @@ When generating available slots:
 
 ## Notes
 
-- This feature can be partially implemented without F02 and F03. At minimum, double-booking prevention and buffer enforcement should be done using CalendAI's own booking data.
-- With F02 complete, also check Google Calendar events for conflicts.
+- F02 is now complete. Double-booking prevention, buffer enforcement, slot duration, and calendar integration are done.
+- Google Calendar event conflict checking is implemented in `calculateAvailability()`.
 - With F03 complete, use stored availability rules instead of hardcoded hours.
 - Timezone handling is subtle — use a library like `date-fns-tz` or handle conversions carefully with native `Intl` APIs.

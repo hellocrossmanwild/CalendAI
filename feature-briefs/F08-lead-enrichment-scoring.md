@@ -11,6 +11,11 @@
 - **No direct dependency on F01**. Lead enrichment and scoring work on booking data, not user authentication.
 - **Email-based registration** — since users now register with email (not username), the host's email domain is reliably available for enrichment context if needed.
 
+### Impact from F02 Implementation
+
+- **Calendar event description available** — F02's `createCalendarEvent()` generates event descriptions with guest info. R3 (Lead Score Display) mentions including lead score in calendar event descriptions — this can be done by enhancing the description template in `server/calendar-service.ts` to include the score after enrichment completes.
+- **Booking creation flow is the integration point** — F02's booking creation in `POST /api/public/book` (in `server/routes.ts`) is where R2 (Automatic Enrichment) should fire-and-forget the `enrichAndScore()` call. The calendar event is also created here, so enrichment data could be included if it completes fast enough (or the calendar event could be updated later).
+
 ---
 
 ## Current State

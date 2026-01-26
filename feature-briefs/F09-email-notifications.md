@@ -38,6 +38,13 @@ F01 established a token-based verification pattern (generate token → store in 
 - Token table schema — `password_reset_tokens`, `magic_link_tokens`, `email_verification_tokens` in `shared/models/auth.ts`
 - Expiry + used flag verification pattern
 
+### Impact from F02 Implementation
+
+- **Booking creation now creates calendar events** — F02's `POST /api/public/book` handler creates a Google Calendar event and stores `calendarEventId`. R4 (Send Confirmation Emails) should include the Google Meet link from the calendar event in the confirmation email to the booker.
+- **Calendar invite sent automatically** — F02 adds the guest as an attendee on the Google Calendar event, which means Google itself sends a calendar invitation email. The booker confirmation email (R2) should reference this: "A calendar invite has also been sent to your email."
+- **`sendEmail()` stub still in place** — F02 did not modify the email stub. F09 still needs to replace it with real email delivery.
+- **Booking deletion triggers calendar cleanup** — F02's booking deletion route removes the Google Calendar event. R4's cancellation emails should be sent from the same code path.
+
 ---
 
 ## Current State

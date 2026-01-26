@@ -11,6 +11,11 @@
 - **No direct dependency on F01**, but users are now authenticated via email which means the AI conversation (R1) can reference the host's email domain for website scanning suggestions.
 - **User model expanded** — `emailVerified` field added. When F13 adds `companyName` and `websiteUrl` to the user model, AI event type creation can pre-populate these.
 
+### Impact from F02 Implementation
+
+- **Google Meet auto-generation is now available** — F02's `createCalendarEvent()` in `server/calendar-service.ts` automatically provisions Google Meet links via `conferenceData.createRequest`. R4 (Location/Meeting Link Configuration) can leverage this: when location is set to "Google Meet", the calendar event creation already handles it.
+- **Calendar connection check available** — `GET /api/calendar/status` returns whether Google Calendar is connected, which can inform the AI conversation (e.g., "I see you have Google Calendar connected — shall I set up Google Meet links automatically?").
+
 ---
 
 ## Current State
