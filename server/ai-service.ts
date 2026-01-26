@@ -1,0 +1,224 @@
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+});
+
+export interface LeadEnrichmentData {
+  companyInfo?: {
+    name?: string;
+    industry?: string;
+    size?: string;
+    website?: string;
+    description?: string;
+    recentNews?: string[];
+  };
+  personalInfo?: {
+    role?: string;
+    linkedInUrl?: string;
+    bio?: string;
+    interests?: string[];
+  };
+}
+
+export async function enrichLead(
+  name: string,
+  email: string,
+  company?: string
+): Promise<LeadEnrichmentData> {
+  const domain = email.split("@")[1];
+  
+  const prompt = `You are a lead research assistant. Based on the following information, provide enriched data about this person and their company.
+
+Name: ${name}
+Email: ${email}
+${company ? `Company: ${company}` : `Email Domain: ${domain}`}
+
+Please research and provide:
+1. Company information (industry, size estimate, description, any recent news)
+2. Personal information (likely role based on typical patterns, potential LinkedIn profile structure)
+
+Respond in JSON format with this structure:
+{
+  "companyInfo": {
+    "name": "Company Name",
+    "industry": "Industry",
+    "size": "1-10 / 11-50 / 51-200 / 201-500 / 501-1000 / 1001+",
+    "website": "https://company.com",
+    "description": "Brief company description",
+    "recentNews": ["News item 1", "News item 2"]
+  },
+  "personalInfo": {
+    "role": "Likely role/title",
+    "linkedInUrl": "https://linkedin.com/in/estimated-profile",
+    "bio": "Brief bio based on available info",
+    "interests": ["interest1", "interest2"]
+  }
+}
+
+Be realistic - if you don't have enough information for a field, omit it. Base your response on reasonable inferences from the email domain and name.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return {};
+    }
+
+    return JSON.parse(content) as LeadEnrichmentData;
+  } catch (error) {
+    console.error("Lead enrichment error:", error);
+    return {};
+  }
+}
+
+export interface MeetingBriefData {
+  summary: string;
+  talkingPoints: string[];
+  keyContext: string[];
+  documentAnalysis?: string;
+}
+
+export async function generateMeetingBrief(
+  guestName: string,
+  guestEmail: string,
+  guestCompany: string | null,
+  eventTypeName: string,
+  eventTypeDescription: string | null,
+  enrichment: LeadEnrichmentData | null,
+  notes: string | null,
+  chatHistory: { role: string; content: string }[] | null
+): Promise<MeetingBriefData> {
+  const enrichmentContext = enrichment
+    ? `
+Company Info: ${JSON.stringify(enrichment.companyInfo || {})}
+Personal Info: ${JSON.stringify(enrichment.personalInfo || {})}`
+    : "";
+
+  const chatContext = chatHistory?.length
+    ? `
+Pre-qualification conversation:
+${chatHistory.map((m) => `${m.role}: ${m.content}`).join("\n")}`
+    : "";
+
+  const prompt = `You are a meeting preparation assistant. Generate a comprehensive meeting brief based on the following information.
+
+Guest: ${guestName}
+Email: ${guestEmail}
+${guestCompany ? `Company: ${guestCompany}` : ""}
+Meeting Type: ${eventTypeName}
+${eventTypeDescription ? `Meeting Description: ${eventTypeDescription}` : ""}
+${notes ? `Additional Notes: ${notes}` : ""}
+${enrichmentContext}
+${chatContext}
+
+Generate a meeting brief with:
+1. A concise summary of who this person is and what they likely want to discuss
+2. 3-5 specific talking points to address in the meeting
+3. Key context points to keep in mind
+
+Respond in JSON format:
+{
+  "summary": "A 2-3 sentence summary of the meeting context",
+  "talkingPoints": ["Talking point 1", "Talking point 2", ...],
+  "keyContext": ["Context item 1", "Context item 2", ...]
+}`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return {
+        summary: "Unable to generate brief",
+        talkingPoints: [],
+        keyContext: [],
+      };
+    }
+
+    return JSON.parse(content) as MeetingBriefData;
+  } catch (error) {
+    console.error("Meeting brief generation error:", error);
+    return {
+      summary: "Unable to generate brief",
+      talkingPoints: [],
+      keyContext: [],
+    };
+  }
+}
+
+export interface ChatResponse {
+  response: string;
+  complete: boolean;
+  extractedData?: Record<string, string>;
+}
+
+export async function processPrequalChat(
+  messages: { role: string; content: string }[],
+  eventTypeName: string,
+  questions: string[],
+  guestInfo: { name: string; email: string; company?: string }
+): Promise<ChatResponse> {
+  const questionsContext = questions.length > 0
+    ? `The following are the key questions to gather information about:
+${questions.map((q, i) => `${i + 1}. ${q}`).join("\n")}`
+    : "Ask general qualifying questions about their needs and how you can help them.";
+
+  const prompt = `You are a friendly pre-qualification assistant for scheduling meetings. Your goal is to naturally gather information through conversation.
+
+Meeting type: ${eventTypeName}
+Guest: ${guestInfo.name} (${guestInfo.email})${guestInfo.company ? ` from ${guestInfo.company}` : ""}
+
+${questionsContext}
+
+Conversation so far:
+${messages.map((m) => `${m.role === "assistant" ? "Assistant" : "Guest"}: ${m.content}`).join("\n")}
+
+Guidelines:
+- Be conversational and friendly, not robotic
+- Ask one question at a time
+- Acknowledge their responses before asking the next question
+- Once you have gathered enough information (usually 2-3 exchanges), indicate the conversation is complete
+- Keep responses concise (1-2 sentences)
+
+Respond in JSON format:
+{
+  "response": "Your next message to the guest",
+  "complete": true/false (true if you have enough information to proceed with booking),
+  "extractedData": { "key": "value" } (any relevant data extracted from the conversation)
+}`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return {
+        response: "Thanks for the information! You can proceed with booking.",
+        complete: true,
+      };
+    }
+
+    return JSON.parse(content) as ChatResponse;
+  } catch (error) {
+    console.error("Chat processing error:", error);
+    return {
+      response: "Thanks for the information! You can proceed with booking.",
+      complete: true,
+    };
+  }
+}
