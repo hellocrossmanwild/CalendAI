@@ -11,7 +11,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import NotFound from "@/pages/not-found";
-import LandingPage from "@/pages/landing";
 import DashboardPage from "@/pages/dashboard";
 import EventTypesPage from "@/pages/event-types";
 import EventTypeFormPage from "@/pages/event-type-form";
@@ -81,14 +80,29 @@ function AppContent() {
     );
   }
 
-  return (
-    <Switch>
-      <Route path="/book/:slug" component={BookPage} />
-      <Route>
-        {isAuthenticated ? <AuthenticatedRoutes /> : <LandingPage />}
-      </Route>
-    </Switch>
-  );
+  // Public booking pages work without auth
+  if (window.location.pathname.startsWith("/book/")) {
+    return (
+      <Switch>
+        <Route path="/book/:slug" component={BookPage} />
+      </Switch>
+    );
+  }
+
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
+    window.location.href = "/api/login";
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="space-y-4 text-center">
+          <Skeleton className="h-12 w-12 rounded-md mx-auto" />
+          <Skeleton className="h-4 w-32 mx-auto" />
+        </div>
+      </div>
+    );
+  }
+
+  return <AuthenticatedRoutes />;
 }
 
 function App() {
