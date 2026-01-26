@@ -6,6 +6,13 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **No direct dependency on F01**. This feature is primarily about availability calculation and slot management.
+- **User authentication is in place** — authenticated endpoints for host-side configuration are ready.
+
+---
+
 ## Current State
 
 The availability and time selection system is minimal:

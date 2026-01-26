@@ -3,136 +3,110 @@
 **Priority:** High
 **Estimated Scope:** Medium
 **Dependencies:** None
+**Status: IMPLEMENTED** (email sending stubbed to console — awaiting F09)
 
 ---
 
-## Current State
+## Implementation Summary
 
-The app has basic username/password authentication with session management:
+All 6 requirements (R1–R6) have been implemented. Email sending for magic links, password reset, and email verification is stubbed to `console.log` pending F09 (Email Notifications).
 
-- **Registration:** `POST /api/auth/register` accepts `username`, `password`, `firstName`, `lastName` (`server/routes.ts:24-50`)
-- **Login:** `POST /api/auth/login` authenticates with `username`/`password` (`server/routes.ts:52-75`)
-- **Sessions:** PostgreSQL-backed via `connect-pg-simple`, 7-day expiry (`server/index.ts:44-59`)
-- **Password hashing:** bcrypt with 10 rounds (`server/routes.ts:36`)
-- **User model:** `shared/models/auth.ts` — fields: `id`, `email`, `username`, `password`, `firstName`, `lastName`, `profileImageUrl`, `createdAt`, `updatedAt`
-- **Frontend:** `client/src/pages/auth.tsx` — toggle between login/signup forms using `username` field
+### What Was Built
 
-### What's Missing vs PRD
+| Requirement | Status | Details |
+|-------------|--------|---------|
+| R1: Email as primary identifier | Done | Registration and login use email. `getUserByEmail()` added to storage layer. |
+| R2: Google OAuth | Done | `GET /api/auth/google` + callback. Auto-creates/links accounts. Requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` env vars. |
+| R3: Magic link auth | Done (stub) | `POST /api/auth/magic-link` + `GET /api/auth/magic-link/verify`. 15-min token expiry. Email stubbed to console. |
+| R4: Password reset | Done (stub) | `POST /api/auth/forgot-password` + `POST /api/auth/reset-password`. 1-hour token expiry. Email stubbed to console. |
+| R5: Email verification | Done (stub) | `emailVerified` field on users. Verification token sent on registration. `GET /api/auth/verify-email` + `POST /api/auth/resend-verification`. Email stubbed to console. |
+| R6: Password strength | Done | Min 8 chars, uppercase, lowercase, number. Validated on backend and frontend. Visual strength indicator on signup. |
 
-1. **Email-based auth** — PRD specifies email/password, not username/password
-2. **Google OAuth** — Packages installed (`google-auth-library`, `openid-client`) but unused
-3. **Magic link authentication** — Not implemented
-4. **Password reset flow** — Not implemented
-5. **Email verification** — Not implemented
-6. **Password strength validation** — Not implemented
-
----
-
-## Requirements
-
-### R1: Switch from Username to Email as Primary Identifier
-
-- Change registration to accept `email` instead of `username` as the primary field
-- Update `POST /api/auth/register` to validate email format and check for existing email
-- Update `POST /api/auth/login` to authenticate with `email`/`password`
-- Update `client/src/pages/auth.tsx` to show email field instead of username
-- Keep `username` in the user model as an optional display name (or remove it)
-- Add email format validation (Zod schema)
-
-### R2: Google OAuth
-
-- Implement Google OAuth 2.0 flow using the installed `google-auth-library` package
-- Add `GET /api/auth/google` — redirects to Google consent screen
-- Add `GET /api/auth/google/callback` — handles OAuth callback, creates/finds user, sets session
-- Frontend: Add "Sign in with Google" button on auth page
-- If Google user doesn't exist, auto-create account from Google profile data (email, name, photo)
-- If Google user exists (matched by email), link and login
-- Environment variables needed: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
-
-### R3: Magic Link Authentication
-
-- Add `POST /api/auth/magic-link` — accepts email, generates a time-limited token, sends email with login link
-- Add `GET /api/auth/magic-link/verify?token=xxx` — verifies token, creates session
-- Token should expire in 15 minutes
-- Store tokens in a new `magic_link_tokens` table or use a signed JWT
-- Frontend: Add "Sign in with email link" option on auth page
-- Requires email sending capability (coordinate with F09 Email Notifications feature)
-
-### R4: Password Reset Flow
-
-- Add `POST /api/auth/forgot-password` — accepts email, sends reset link
-- Add `POST /api/auth/reset-password` — accepts token + new password, updates password
-- Token expires in 1 hour
-- Frontend: Add "Forgot password?" link on login form, reset password page
-- Requires email sending capability (coordinate with F09)
-
-### R5: Email Verification
-
-- On email/password registration, set `emailVerified: false` on user
-- Send verification email with unique token
-- Add `GET /api/auth/verify-email?token=xxx` — marks email as verified
-- Add `emailVerified` boolean field to users table
-- Optionally restrict certain features until email is verified
-- Requires email sending capability (coordinate with F09)
-
-### R6: Password Strength Validation
-
-- Minimum 8 characters
-- At least one uppercase, one lowercase, one number
-- Add validation on both frontend (form) and backend (API)
-- Show password strength indicator on signup form
-
----
-
-## Files to Modify
+### Files Modified
 
 | File | Changes |
 |------|---------|
-| `shared/models/auth.ts` | Add `emailVerified` boolean field to users table |
-| `shared/schema.ts` | Add `magicLinkTokens` or `passwordResetTokens` table if needed |
-| `server/routes.ts` | Update register/login to use email; add Google OAuth, magic link, password reset routes |
-| `server/storage.ts` | Add `getUserByEmail()`, token CRUD methods |
-| `server/index.ts` | Add Google OAuth middleware setup if needed |
-| `client/src/pages/auth.tsx` | Rewrite to show email field, Google button, magic link option, forgot password link |
-| `client/src/hooks/use-auth.ts` | Update if auth response shape changes |
+| `shared/models/auth.ts` | Added `emailVerified` boolean to users table. Added `passwordResetTokens`, `magicLinkTokens`, `emailVerificationTokens` tables. |
+| `server/routes.ts` | Rewrote register/login for email. Added Google OAuth, magic link, password reset, email verification, resend verification endpoints. Added `validatePasswordStrength()`, `isValidEmail()`, `generateToken()`, `sendEmail()` (stub). |
+| `server/storage.ts` | Added `getUserByEmail()`, `updateUser()`. Added token CRUD for all 3 token types (password reset, magic link, email verification). |
+| `client/src/pages/auth.tsx` | Complete rewrite: email-based login/register, Google OAuth button, magic link flow, forgot password flow, reset password page, email verification page, password strength indicator component. |
+| `client/src/App.tsx` | Added auth-related route handling (`/auth/verify-email`, `/auth/magic-link`, `/auth/reset-password`). |
 
----
-
-## Database Changes
+### Database Tables Added
 
 ```sql
--- Add emailVerified to users
-ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT false;
+-- emailVerified added to users table
+email_verified BOOLEAN DEFAULT false
 
--- Optional: password reset tokens table
-CREATE TABLE password_reset_tokens (
-  id SERIAL PRIMARY KEY,
-  user_id VARCHAR NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token VARCHAR NOT NULL UNIQUE,
-  expires_at TIMESTAMP NOT NULL,
-  used BOOLEAN DEFAULT false,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+-- New tables
+password_reset_tokens (id, user_id, token, expires_at, used, created_at)
+magic_link_tokens (id, email, token, expires_at, used, created_at)
+email_verification_tokens (id, user_id, token, expires_at, used, created_at)
 ```
+
+### API Endpoints Added
+
+```
+POST /api/auth/register              → Email + password registration (was username)
+POST /api/auth/login                 → Email + password login (was username)
+POST /api/auth/logout                → (unchanged)
+GET  /api/auth/user                  → Now excludes password from response
+GET  /api/auth/google                → Redirect to Google OAuth
+GET  /api/auth/google/callback       → Google OAuth callback
+POST /api/auth/magic-link            → Request magic link email
+GET  /api/auth/magic-link/verify     → Verify magic link token
+POST /api/auth/forgot-password       → Request password reset email
+POST /api/auth/reset-password        → Reset password with token
+GET  /api/auth/verify-email          → Verify email with token
+POST /api/auth/resend-verification   → Resend verification email (auth required)
+```
+
+### What's Stubbed (Waiting for F09)
+
+The `sendEmail()` function in `server/routes.ts` logs email content to the server console. When F09 implements real email infrastructure, replace this stub with:
+
+```typescript
+// Current stub in server/routes.ts:
+function sendEmail(to: string, subject: string, body: string): void {
+  console.log(`\n========== EMAIL (stub) ==========`);
+  console.log(`To: ${to}`);
+  console.log(`Subject: ${subject}`);
+  console.log(`Body: ${body}`);
+  console.log(`==================================\n`);
+}
+```
+
+F09 should:
+1. Create `server/email-service.ts` with a real `sendEmail()` function
+2. Update the stub in `server/routes.ts` to import and use the real service
+3. Wire up: verification emails, magic link emails, password reset emails
+
+### Patterns Established for Other Features
+
+- **Token-based verification pattern**: `generateToken()` + database table + expiry check + mark-as-used. This pattern can be reused by F09 (booking tokens for reschedule/cancel) and F12.
+- **`updateUser()` storage method**: New method available for any feature that needs to update user fields (F13 settings, etc.).
+- **Password validation utility**: `validatePasswordStrength()` can be reused by F13 (change password).
+- **`/api/auth/user` now excludes password hash** from response for security.
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Users can register with email + password (not username)
-- [ ] Users can log in with email + password
-- [ ] Users can sign in with Google OAuth
-- [ ] Users can request a magic link login via email
-- [ ] Users can reset their password via email
-- [ ] Email verification is sent on registration
-- [ ] Password strength is validated on signup (min 8 chars, mixed case, number)
-- [ ] Existing sessions continue to work
-- [ ] All auth flows redirect to dashboard on success
+- [x] Users can register with email + password (not username)
+- [x] Users can log in with email + password
+- [x] Users can sign in with Google OAuth (requires env vars configured)
+- [x] Users can request a magic link login via email (stubbed to console)
+- [x] Users can reset their password via email (stubbed to console)
+- [x] Email verification is sent on registration (stubbed to console)
+- [x] Password strength is validated on signup (min 8 chars, mixed case, number)
+- [x] Existing sessions continue to work
+- [x] All auth flows redirect to dashboard on success
 
 ---
 
 ## Notes
 
-- Magic link, password reset, and email verification all require email sending. If F09 (Email Notifications) is not yet implemented, these features can store tokens and log the email content to console as a stub, with actual sending wired up later.
-- Google OAuth requires Google Cloud Console project with OAuth credentials configured.
-- The `passport` and `passport-local` packages are installed but not currently used. You may choose to use them or continue with the current manual session approach.
+- Magic link, password reset, and email verification emails are logged to the server console as stubs. Wire up real delivery when F09 (Email Notifications) is implemented.
+- Google OAuth requires `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` environment variables. Without them, the Google button returns a 503 error.
+- The `username` field remains in the user model as an optional display name but is no longer used for authentication.
+- The `passport` and `passport-local` packages remain installed but unused — the manual session approach was continued for consistency.

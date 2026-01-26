@@ -6,6 +6,24 @@
 
 ---
 
+## Impact from F01 Implementation
+
+**F01 directly enables several F13 features:**
+
+- **`updateUser()` storage method exists** — added in F01, ready for R1 (Profile Editing). No need to create it.
+- **`emailVerified` field on users** — F01 added this field. The settings page should display verification status and offer a "Resend verification" button (endpoint `POST /api/auth/resend-verification` already exists).
+- **Password strength validation available** — `validatePasswordStrength()` in `server/routes.ts` can be reused for R3 (Password Change). The `PasswordStrengthIndicator` React component in `client/src/pages/auth.tsx` can be extracted and reused in the settings password change form.
+- **User model changes** — F01 added `emailVerified` to `shared/models/auth.ts`. R1 plans to add `companyName`, `websiteUrl`, `timezone` — these are additive changes to the same file.
+- **`/api/auth/user` excludes password** — F01 updated this endpoint to strip the password hash from responses, so the settings page receives clean user data.
+- **Google OAuth profile image** — users who signed in via Google already have `profileImageUrl` set. The settings page can display this and offer photo change.
+
+### Reusable components from F01:
+- `PasswordStrengthIndicator` component (currently in `client/src/pages/auth.tsx` — extract to shared component for R3)
+- `validatePasswordStrength()` function (backend, in `server/routes.ts`)
+- `isValidEmail()` function (backend, in `server/routes.ts`)
+
+---
+
 ## Current State
 
 The settings page (`client/src/pages/settings.tsx`) is minimal:

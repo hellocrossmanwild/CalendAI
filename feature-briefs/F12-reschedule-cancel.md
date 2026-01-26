@@ -6,6 +6,15 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **Token-based access pattern established by F01** — F01 created three token tables (`password_reset_tokens`, `magic_link_tokens`, `email_verification_tokens`) using a consistent pattern: generate token → store with expiry → verify → mark used. **R1 (Booking Tokens)** can follow the exact same pattern for `rescheduleToken` and `cancelToken`.
+- **`generateToken()` utility available** — `crypto.randomBytes(32).toString("hex")` in `server/routes.ts` can be reused or extracted into a shared utility.
+- **`sendEmail()` stub ready** — notification emails for reschedule/cancel (R2–R4) can use the existing stub, which F09 will later replace with real delivery.
+- **Storage pattern for token CRUD** — `createToken()`, `getToken()`, `markTokenUsed()` methods in `server/storage.ts` demonstrate the pattern for booking token management.
+
+---
+
 ## Current State
 
 Cancellation is minimal and reschedule is absent:

@@ -6,8 +6,45 @@ import { enrichLead, generateMeetingBrief, processPrequalChat } from "./ai-servi
 import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
 import { addHours, addMinutes, setHours, setMinutes, format, startOfDay, isBefore } from "date-fns";
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 
 const objectStorageService = new ObjectStorageService();
+
+// Password strength validation
+function validatePasswordStrength(password: string): { valid: boolean; message: string } {
+  if (password.length < 8) {
+    return { valid: false, message: "Password must be at least 8 characters long" };
+  }
+  if (!/[A-Z]/.test(password)) {
+    return { valid: false, message: "Password must contain at least one uppercase letter" };
+  }
+  if (!/[a-z]/.test(password)) {
+    return { valid: false, message: "Password must contain at least one lowercase letter" };
+  }
+  if (!/[0-9]/.test(password)) {
+    return { valid: false, message: "Password must contain at least one number" };
+  }
+  return { valid: true, message: "Password is strong" };
+}
+
+// Email validation
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// Generate a secure random token
+function generateToken(): string {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+// Stub email sender (logs to console until F09 implements real email)
+function sendEmail(to: string, subject: string, body: string): void {
+  console.log(`\n========== EMAIL (stub) ==========`);
+  console.log(`To: ${to}`);
+  console.log(`Subject: ${subject}`);
+  console.log(`Body: ${body}`);
+  console.log(`==================================\n`);
+}
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.user) {
@@ -21,42 +58,72 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // Auth routes
+
+  // R1: Register with email + password (replaces username-based registration)
   app.post("/api/auth/register", async (req, res) => {
     try {
-      const { username, password, firstName, lastName } = req.body;
-      if (!username || !password) {
-        return res.status(400).json({ error: "Username and password are required" });
+      const { email, password, firstName, lastName } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
       }
 
-      const existing = await storage.getUserByUsername(username);
+      if (!isValidEmail(email)) {
+        return res.status(400).json({ error: "Please enter a valid email address" });
+      }
+
+      // R6: Password strength validation
+      const strength = validatePasswordStrength(password);
+      if (!strength.valid) {
+        return res.status(400).json({ error: strength.message });
+      }
+
+      const existing = await storage.getUserByEmail(email);
       if (existing) {
-        return res.status(400).json({ error: "Username already taken" });
+        return res.status(400).json({ error: "An account with this email already exists" });
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
       const user = await storage.createUser({
-        username,
+        email,
         password: hashedPassword,
         firstName: firstName || null,
         lastName: lastName || null,
       });
 
+      // R5: Send email verification
+      const verifyToken = generateToken();
+      const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      await storage.createEmailVerificationToken(user.id, verifyToken, verifyExpires);
+      const verifyUrl = `${req.protocol}://${req.get("host")}/auth/verify-email?token=${verifyToken}`;
+      sendEmail(
+        email,
+        "Verify your CalendAI email",
+        `Welcome to CalendAI! Please verify your email by clicking this link: ${verifyUrl}\n\nThis link expires in 24 hours.`
+      );
+
       (req.session as any).userId = user.id;
-      res.json({ id: user.id, username: user.username, firstName: user.firstName, lastName: user.lastName });
+      res.json({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        emailVerified: user.emailVerified,
+      });
     } catch (error) {
       console.error("Registration error:", error);
       res.status(500).json({ error: "Registration failed" });
     }
   });
 
+  // R1: Login with email + password (replaces username-based login)
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const { username, password } = req.body;
-      if (!username || !password) {
-        return res.status(400).json({ error: "Username and password are required" });
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
       }
 
-      const user = await storage.getUserByUsername(username);
+      const user = await storage.getUserByEmail(email);
       if (!user || !user.password) {
         return res.status(401).json({ error: "Invalid credentials" });
       }
@@ -67,7 +134,13 @@ export async function registerRoutes(
       }
 
       (req.session as any).userId = user.id;
-      res.json({ id: user.id, username: user.username, firstName: user.firstName, lastName: user.lastName });
+      res.json({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        emailVerified: user.emailVerified,
+      });
     } catch (error) {
       console.error("Login error:", error);
       res.status(500).json({ error: "Login failed" });
@@ -88,7 +161,277 @@ export async function registerRoutes(
     if (!req.user) {
       return res.status(401).json({ error: "Not authenticated" });
     }
-    res.json(req.user);
+    const { password, ...safeUser } = req.user;
+    res.json(safeUser);
+  });
+
+  // R2: Google OAuth - redirect to Google consent screen
+  app.get("/api/auth/google", async (req, res) => {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      return res.status(503).json({ error: "Google OAuth is not configured" });
+    }
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
+    const scope = encodeURIComponent("openid email profile");
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${scope}&access_type=offline&prompt=consent`;
+    res.redirect(authUrl);
+  });
+
+  // R2: Google OAuth - callback handler
+  app.get("/api/auth/google/callback", async (req, res) => {
+    try {
+      const { code } = req.query;
+      if (!code) {
+        return res.redirect("/auth?error=google_auth_failed");
+      }
+
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/auth/google/callback`;
+
+      if (!clientId || !clientSecret) {
+        return res.redirect("/auth?error=google_not_configured");
+      }
+
+      // Exchange code for tokens
+      const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code: code as string,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: "authorization_code",
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        console.error("Google token exchange failed:", await tokenResponse.text());
+        return res.redirect("/auth?error=google_auth_failed");
+      }
+
+      const tokens = await tokenResponse.json() as { access_token: string };
+
+      // Get user info from Google
+      const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+
+      if (!userInfoResponse.ok) {
+        return res.redirect("/auth?error=google_auth_failed");
+      }
+
+      const googleUser = await userInfoResponse.json() as {
+        email: string;
+        given_name?: string;
+        family_name?: string;
+        picture?: string;
+      };
+
+      // Find or create user
+      let user = await storage.getUserByEmail(googleUser.email);
+      if (!user) {
+        user = await storage.createUser({
+          email: googleUser.email,
+          password: "", // No password for OAuth users
+          firstName: googleUser.given_name || null,
+          lastName: googleUser.family_name || null,
+        });
+        // Google-authenticated users are automatically email-verified
+        await storage.updateUser(user.id, {
+          emailVerified: true,
+          profileImageUrl: googleUser.picture || null,
+        });
+      } else if (!user.emailVerified) {
+        // If existing user signs in with Google, verify their email
+        await storage.updateUser(user.id, { emailVerified: true });
+      }
+
+      (req.session as any).userId = user.id;
+      res.redirect("/");
+    } catch (error) {
+      console.error("Google OAuth error:", error);
+      res.redirect("/auth?error=google_auth_failed");
+    }
+  });
+
+  // R3: Magic link - request a login link via email
+  app.post("/api/auth/magic-link", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email || !isValidEmail(email)) {
+        return res.status(400).json({ error: "Please enter a valid email address" });
+      }
+
+      // Always return success to avoid leaking whether an email is registered
+      const token = generateToken();
+      const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+      await storage.createMagicLinkToken(email, token, expiresAt);
+
+      const magicUrl = `${req.protocol}://${req.get("host")}/auth/magic-link?token=${token}`;
+      sendEmail(
+        email,
+        "Your CalendAI login link",
+        `Click here to sign in to CalendAI: ${magicUrl}\n\nThis link expires in 15 minutes. If you didn't request this, you can safely ignore this email.`
+      );
+
+      res.json({ success: true, message: "If an account exists with that email, a login link has been sent" });
+    } catch (error) {
+      console.error("Magic link error:", error);
+      res.status(500).json({ error: "Failed to send magic link" });
+    }
+  });
+
+  // R3: Magic link - verify token and create session
+  app.get("/api/auth/magic-link/verify", async (req, res) => {
+    try {
+      const { token } = req.query;
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      const tokenRecord = await storage.getMagicLinkToken(token as string);
+      if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
+        return res.status(400).json({ error: "Invalid or expired token" });
+      }
+
+      await storage.markMagicLinkTokenUsed(tokenRecord.id);
+
+      // Find or create user
+      let user = await storage.getUserByEmail(tokenRecord.email);
+      if (!user) {
+        user = await storage.createUser({
+          email: tokenRecord.email,
+          password: "", // No password for magic link users
+        });
+      }
+
+      // Magic link verifies email ownership
+      if (!user.emailVerified) {
+        await storage.updateUser(user.id, { emailVerified: true });
+      }
+
+      (req.session as any).userId = user.id;
+      res.json({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        emailVerified: true,
+      });
+    } catch (error) {
+      console.error("Magic link verify error:", error);
+      res.status(500).json({ error: "Failed to verify magic link" });
+    }
+  });
+
+  // R4: Password reset - request a reset link
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email || !isValidEmail(email)) {
+        return res.status(400).json({ error: "Please enter a valid email address" });
+      }
+
+      // Always return success to avoid leaking whether an email is registered
+      const user = await storage.getUserByEmail(email);
+      if (user) {
+        const token = generateToken();
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        await storage.createPasswordResetToken(user.id, token, expiresAt);
+
+        const resetUrl = `${req.protocol}://${req.get("host")}/auth/reset-password?token=${token}`;
+        sendEmail(
+          email,
+          "Reset your CalendAI password",
+          `Click here to reset your password: ${resetUrl}\n\nThis link expires in 1 hour. If you didn't request this, you can safely ignore this email.`
+        );
+      }
+
+      res.json({ success: true, message: "If an account exists with that email, a reset link has been sent" });
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      res.status(500).json({ error: "Failed to process password reset" });
+    }
+  });
+
+  // R4: Password reset - reset password with token
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { token, password } = req.body;
+      if (!token || !password) {
+        return res.status(400).json({ error: "Token and new password are required" });
+      }
+
+      const strength = validatePasswordStrength(password);
+      if (!strength.valid) {
+        return res.status(400).json({ error: strength.message });
+      }
+
+      const tokenRecord = await storage.getPasswordResetToken(token);
+      if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
+        return res.status(400).json({ error: "Invalid or expired reset token" });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      await storage.updateUser(tokenRecord.userId, { password: hashedPassword });
+      await storage.markPasswordResetTokenUsed(tokenRecord.id);
+
+      res.json({ success: true, message: "Password has been reset successfully" });
+    } catch (error) {
+      console.error("Reset password error:", error);
+      res.status(500).json({ error: "Failed to reset password" });
+    }
+  });
+
+  // R5: Email verification - verify email with token
+  app.get("/api/auth/verify-email", async (req, res) => {
+    try {
+      const { token } = req.query;
+      if (!token) {
+        return res.status(400).json({ error: "Token is required" });
+      }
+
+      const tokenRecord = await storage.getEmailVerificationToken(token as string);
+      if (!tokenRecord || tokenRecord.used || new Date() > tokenRecord.expiresAt) {
+        return res.status(400).json({ error: "Invalid or expired verification token" });
+      }
+
+      await storage.updateUser(tokenRecord.userId, { emailVerified: true });
+      await storage.markEmailVerificationTokenUsed(tokenRecord.id);
+
+      res.json({ success: true, message: "Email verified successfully" });
+    } catch (error) {
+      console.error("Email verification error:", error);
+      res.status(500).json({ error: "Failed to verify email" });
+    }
+  });
+
+  // R5: Resend verification email
+  app.post("/api/auth/resend-verification", requireAuth, async (req, res) => {
+    try {
+      if (req.user.emailVerified) {
+        return res.status(400).json({ error: "Email is already verified" });
+      }
+
+      const token = generateToken();
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+      await storage.createEmailVerificationToken(req.user.id, token, expiresAt);
+
+      const verifyUrl = `${req.protocol}://${req.get("host")}/auth/verify-email?token=${token}`;
+      sendEmail(
+        req.user.email,
+        "Verify your CalendAI email",
+        `Please verify your email by clicking this link: ${verifyUrl}\n\nThis link expires in 24 hours.`
+      );
+
+      res.json({ success: true, message: "Verification email sent" });
+    } catch (error) {
+      console.error("Resend verification error:", error);
+      res.status(500).json({ error: "Failed to resend verification email" });
+    }
   });
 
   // Event Types CRUD

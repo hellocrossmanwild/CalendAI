@@ -6,6 +6,13 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **No direct dependency on F01**. Dashboard enhancements are about booking management UI.
+- **User data shape updated** — the `/api/auth/user` response now includes `emailVerified` and excludes `password`. If the dashboard displays user info, it should use the updated shape.
+
+---
+
 ## Current State
 
 The dashboard and booking management have basic functionality:

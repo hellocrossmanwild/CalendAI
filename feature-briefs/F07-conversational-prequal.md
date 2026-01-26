@@ -6,6 +6,13 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **No direct dependency on F01**. The pre-qual chat is a public-facing feature that doesn't require authentication.
+- **Email validation utility available** — F01 added `isValidEmail()` in `server/routes.ts` which could be reused if AI conversation needs to validate email format (R4 stretch goal of collecting name/email conversationally).
+
+---
+
 ## Current State
 
 The pre-qualification chat has a working foundation:

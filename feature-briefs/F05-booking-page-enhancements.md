@@ -6,6 +6,14 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **Host profile data available** — F01's user model now includes `emailVerified` and the `/api/auth/user` endpoint excludes password hash. When R1 (Display Host Information) fetches host data for the booking page, the password field is already stripped from responses.
+- **`updateUser()` method available** — useful when F13 adds `companyName` to the user model, which R1 needs to display on the booking page.
+- **Profile image from Google OAuth** — users who sign in via Google have `profileImageUrl` set automatically, which can be displayed as the host photo on the booking page (R1).
+
+---
+
 ## Current State
 
 The public booking page at `/book/:slug` (`client/src/pages/book.tsx`) has:
