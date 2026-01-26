@@ -2,7 +2,7 @@
 
 **Priority:** Critical
 **Estimated Scope:** Medium
-**Dependencies:** F02 (Calendar Connection for real availability) — **SATISFIED**, F03 (Availability Rules)
+**Dependencies:** F02 (Calendar Connection for real availability) — **SATISFIED**, F03 (Availability Rules) — **SATISFIED**
 
 ---
 
@@ -21,10 +21,17 @@ F02 has satisfied several of F06's requirements. Here is what is now done:
 - **Calendar integration: DONE** — `getCalendarEvents()` fetches Google Calendar events for conflict checking.
 - **Client timezone accepted** — `POST /api/public/book` now accepts `timezone` from request body instead of using server timezone.
 
+### Impact from F03 Implementation
+
+F03 has implemented availability rules, satisfying the F03 dependency:
+
+- **R4 (Minimum Notice Period): DONE** — `calculateAvailability()` now reads `minNotice` from the host's `availability_rules` and skips slots within the notice period. Default is 1440 minutes (24 hours).
+- **R5 (Maximum Advance Booking): DONE** — `calculateAvailability()` now reads `maxAdvance` from `availability_rules` and returns empty slots for dates beyond the limit. Default is 60 days.
+- **Host timezone stored** — `availability_rules.timezone` is now stored per user. Can be used for host/booker timezone conversion.
+- **Configurable working hours** — `calculateAvailability()` now uses stored weekly hours instead of hardcoded 9-5, supporting multiple blocks per day and disabled days.
+
 **What remains for F06:**
 - **R3 (Timezone Handling):** Full timezone conversion between host and booker timezones. Availability endpoint needs `timezone` query param. Display timezone on booking page.
-- **R4 (Minimum Notice Period):** Not yet enforced. Depends on F03 availability rules or a default value.
-- **R5 (Maximum Advance Booking):** Not yet enforced. Depends on F03 availability rules or a default value.
 - **R7 (Real-Time Availability):** Periodic refresh or optimistic UI not yet implemented.
 - **Frontend updates:** Timezone detection/display on booking page.
 

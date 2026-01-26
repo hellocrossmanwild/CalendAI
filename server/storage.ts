@@ -15,6 +15,8 @@ import {
   type InsertDocument,
   type MeetingBrief,
   type InsertMeetingBrief,
+  type AvailabilityRules,
+  type InsertAvailabilityRules,
   type CalendarToken,
   type InsertCalendarToken,
   eventTypes,
@@ -23,6 +25,7 @@ import {
   prequalResponses,
   documents,
   meetingBriefs,
+  availabilityRules,
   calendarTokens,
 } from "@shared/schema";
 import { users, passwordResetTokens, magicLinkTokens, emailVerificationTokens } from "@shared/models/auth";
@@ -80,6 +83,9 @@ export interface IStorage {
   getMeetingBrief(bookingId: number): Promise<MeetingBrief | undefined>;
   createMeetingBrief(data: InsertMeetingBrief): Promise<MeetingBrief>;
   updateMeetingBrief(id: number, data: Partial<InsertMeetingBrief>): Promise<MeetingBrief | undefined>;
+
+  getAvailabilityRules(userId: string): Promise<AvailabilityRules | undefined>;
+  upsertAvailabilityRules(data: InsertAvailabilityRules): Promise<AvailabilityRules>;
 
   getCalendarToken(userId: string): Promise<CalendarToken | undefined>;
   upsertCalendarToken(data: InsertCalendarToken): Promise<CalendarToken>;
@@ -292,6 +298,31 @@ export class DatabaseStorage implements IStorage {
   async updateMeetingBrief(id: number, data: Partial<InsertMeetingBrief>): Promise<MeetingBrief | undefined> {
     const [brief] = await db.update(meetingBriefs).set(data).where(eq(meetingBriefs.id, id)).returning();
     return brief;
+  }
+
+  async getAvailabilityRules(userId: string): Promise<AvailabilityRules | undefined> {
+    const [rules] = await db.select().from(availabilityRules).where(eq(availabilityRules.userId, userId)).limit(1);
+    return rules;
+  }
+
+  async upsertAvailabilityRules(data: InsertAvailabilityRules): Promise<AvailabilityRules> {
+    const [rules] = await db
+      .insert(availabilityRules)
+      .values(data)
+      .onConflictDoUpdate({
+        target: availabilityRules.userId,
+        set: {
+          timezone: data.timezone,
+          weeklyHours: data.weeklyHours,
+          minNotice: data.minNotice,
+          maxAdvance: data.maxAdvance,
+          defaultBufferBefore: data.defaultBufferBefore,
+          defaultBufferAfter: data.defaultBufferAfter,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return rules;
   }
 
   async getCalendarToken(userId: string): Promise<CalendarToken | undefined> {

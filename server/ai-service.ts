@@ -157,6 +157,117 @@ Respond in JSON format:
   }
 }
 
+// ---------------------------------------------------------------------------
+// Calendar Pattern Analysis (F03)
+// ---------------------------------------------------------------------------
+
+export interface AvailabilitySuggestions {
+  timezone: string;
+  weeklyHours: {
+    [day: string]: { start: string; end: string }[] | null;
+  };
+  minNotice: number;
+  maxAdvance: number;
+  defaultBufferBefore: number;
+  defaultBufferAfter: number;
+}
+
+export async function analyseCalendarPatterns(
+  events: { start: Date; end: Date; summary: string }[]
+): Promise<AvailabilitySuggestions> {
+  // Prepare a summary of events for the AI
+  const eventSummaries = events.map((e) => ({
+    day: e.start.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase(),
+    start: e.start.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
+    end: e.end.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }),
+    summary: e.summary,
+    date: e.start.toISOString().split("T")[0],
+  }));
+
+  const prompt = `You are a scheduling assistant. Analyse the following calendar events from the past 4 weeks and suggest optimal availability rules for accepting new meeting bookings.
+
+Calendar events (${eventSummaries.length} events):
+${JSON.stringify(eventSummaries, null, 2)}
+
+Based on these patterns, suggest:
+1. Which days of the week this person typically works (and their working hours per day)
+2. Whether there are recurring blocks to avoid (e.g., lunch breaks, standups)
+3. A suggested buffer time between meetings
+4. A reasonable minimum notice period
+5. A reasonable maximum advance booking period
+
+If a day has no events or very few, consider whether they likely work that day.
+For working hours, use 24-hour HH:MM format.
+If a day should be unavailable, set it to null.
+Split the day into blocks if there's a regular break (e.g., lunch 12:00-13:00 means two blocks: 09:00-12:00 and 13:00-17:00).
+
+Respond in JSON format:
+{
+  "timezone": "UTC",
+  "weeklyHours": {
+    "monday": [{ "start": "09:00", "end": "12:00" }, { "start": "13:00", "end": "17:00" }],
+    "tuesday": [{ "start": "09:00", "end": "17:00" }],
+    "wednesday": [{ "start": "09:00", "end": "17:00" }],
+    "thursday": [{ "start": "09:00", "end": "17:00" }],
+    "friday": [{ "start": "09:00", "end": "15:00" }],
+    "saturday": null,
+    "sunday": null
+  },
+  "minNotice": 1440,
+  "maxAdvance": 60,
+  "defaultBufferBefore": 0,
+  "defaultBufferAfter": 15,
+  "reasoning": "Brief explanation of the patterns detected"
+}
+
+minNotice is in minutes (1440 = 24 hours). maxAdvance is in days. Buffer values are in minutes.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return getDefaultSuggestions();
+    }
+
+    const parsed = JSON.parse(content) as AvailabilitySuggestions & { reasoning?: string };
+    return {
+      timezone: parsed.timezone || "UTC",
+      weeklyHours: parsed.weeklyHours || getDefaultSuggestions().weeklyHours,
+      minNotice: parsed.minNotice ?? 1440,
+      maxAdvance: parsed.maxAdvance ?? 60,
+      defaultBufferBefore: parsed.defaultBufferBefore ?? 0,
+      defaultBufferAfter: parsed.defaultBufferAfter ?? 15,
+    };
+  } catch (error) {
+    console.error("Calendar pattern analysis error:", error);
+    return getDefaultSuggestions();
+  }
+}
+
+function getDefaultSuggestions(): AvailabilitySuggestions {
+  return {
+    timezone: "UTC",
+    weeklyHours: {
+      monday: [{ start: "09:00", end: "17:00" }],
+      tuesday: [{ start: "09:00", end: "17:00" }],
+      wednesday: [{ start: "09:00", end: "17:00" }],
+      thursday: [{ start: "09:00", end: "17:00" }],
+      friday: [{ start: "09:00", end: "17:00" }],
+      saturday: null,
+      sunday: null,
+    },
+    minNotice: 1440,
+    maxAdvance: 60,
+    defaultBufferBefore: 0,
+    defaultBufferAfter: 15,
+  };
+}
+
 export interface ChatResponse {
   response: string;
   complete: boolean;

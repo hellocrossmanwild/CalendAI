@@ -2,7 +2,7 @@
 
 **Priority:** Medium
 **Estimated Scope:** Medium
-**Dependencies:** F03 (for availability rules), F09 (for notification preferences)
+**Dependencies:** F03 (for availability rules) — **SATISFIED**, F09 (for notification preferences)
 
 ---
 

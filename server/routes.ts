@@ -706,6 +706,147 @@ export async function registerRoutes(
     }
   });
 
+  // Availability Rules
+  app.get("/api/availability-rules", requireAuth, async (req, res) => {
+    try {
+      const rules = await storage.getAvailabilityRules(req.user!.id);
+      if (!rules) {
+        // Return sensible defaults when no rules exist yet
+        return res.json({
+          userId: req.user!.id,
+          timezone: "UTC",
+          weeklyHours: {
+            monday: [{ start: "09:00", end: "17:00" }],
+            tuesday: [{ start: "09:00", end: "17:00" }],
+            wednesday: [{ start: "09:00", end: "17:00" }],
+            thursday: [{ start: "09:00", end: "17:00" }],
+            friday: [{ start: "09:00", end: "17:00" }],
+            saturday: null,
+            sunday: null,
+          },
+          minNotice: 1440,
+          maxAdvance: 60,
+          defaultBufferBefore: 0,
+          defaultBufferAfter: 0,
+        });
+      }
+      res.json(rules);
+    } catch (error) {
+      console.error("Error fetching availability rules:", error);
+      res.status(500).json({ error: "Failed to fetch availability rules" });
+    }
+  });
+
+  app.put("/api/availability-rules", requireAuth, async (req, res) => {
+    try {
+      const { timezone, weeklyHours, minNotice, maxAdvance, defaultBufferBefore, defaultBufferAfter } = req.body;
+
+      // Validate timezone
+      if (timezone && typeof timezone !== "string") {
+        return res.status(400).json({ error: "Invalid timezone" });
+      }
+
+      // Validate numeric fields
+      if (minNotice != null && (!Number.isInteger(minNotice) || minNotice < 0)) {
+        return res.status(400).json({ error: "minNotice must be a non-negative integer (minutes)" });
+      }
+      if (maxAdvance != null && (!Number.isInteger(maxAdvance) || maxAdvance < 1 || maxAdvance > 365)) {
+        return res.status(400).json({ error: "maxAdvance must be between 1 and 365 (days)" });
+      }
+      if (defaultBufferBefore != null && (!Number.isInteger(defaultBufferBefore) || defaultBufferBefore < 0)) {
+        return res.status(400).json({ error: "defaultBufferBefore must be a non-negative integer (minutes)" });
+      }
+      if (defaultBufferAfter != null && (!Number.isInteger(defaultBufferAfter) || defaultBufferAfter < 0)) {
+        return res.status(400).json({ error: "defaultBufferAfter must be a non-negative integer (minutes)" });
+      }
+
+      // Validate weeklyHours structure
+      if (weeklyHours) {
+        const validDays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+        for (const day of validDays) {
+          const hours = weeklyHours[day];
+          if (hours !== null && hours !== undefined) {
+            if (!Array.isArray(hours)) {
+              return res.status(400).json({ error: `Invalid hours for ${day}` });
+            }
+            for (const block of hours) {
+              if (!block.start || !block.end || typeof block.start !== "string" || typeof block.end !== "string") {
+                return res.status(400).json({ error: `Invalid time block for ${day}` });
+              }
+              // Validate HH:MM format with valid ranges (00:00 - 23:59)
+              const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
+              if (!timeRegex.test(block.start) || !timeRegex.test(block.end)) {
+                return res.status(400).json({ error: `Time must be in HH:MM format (00:00-23:59) for ${day}` });
+              }
+            }
+          }
+        }
+      }
+
+      const rules = await storage.upsertAvailabilityRules({
+        userId: req.user!.id,
+        timezone: timezone || "UTC",
+        weeklyHours: weeklyHours || undefined,
+        minNotice: minNotice != null ? minNotice : undefined,
+        maxAdvance: maxAdvance != null ? maxAdvance : undefined,
+        defaultBufferBefore: defaultBufferBefore != null ? defaultBufferBefore : undefined,
+        defaultBufferAfter: defaultBufferAfter != null ? defaultBufferAfter : undefined,
+      });
+
+      res.json(rules);
+    } catch (error) {
+      console.error("Error saving availability rules:", error);
+      res.status(500).json({ error: "Failed to save availability rules" });
+    }
+  });
+
+  app.post("/api/availability-rules/analyse", requireAuth, async (req, res) => {
+    try {
+      // Import dynamically to avoid circular deps
+      const { analyseCalendarPatterns } = await import("./ai-service");
+      const { getCalendarEvents } = await import("./calendar-service");
+
+      // Check calendar connection
+      const calendarToken = await storage.getCalendarToken(req.user!.id);
+      if (!calendarToken) {
+        return res.status(400).json({ error: "Google Calendar is not connected. Please connect your calendar first." });
+      }
+
+      // Fetch 4 weeks of calendar events for analysis
+      const now = new Date();
+      const fourWeeksAgo = new Date(now.getTime() - 28 * 24 * 60 * 60 * 1000);
+      const events = await getCalendarEvents(req.user!.id, fourWeeksAgo, now);
+
+      if (events.length === 0) {
+        return res.json({
+          suggestions: {
+            timezone: "UTC",
+            weeklyHours: {
+              monday: [{ start: "09:00", end: "17:00" }],
+              tuesday: [{ start: "09:00", end: "17:00" }],
+              wednesday: [{ start: "09:00", end: "17:00" }],
+              thursday: [{ start: "09:00", end: "17:00" }],
+              friday: [{ start: "09:00", end: "17:00" }],
+              saturday: null,
+              sunday: null,
+            },
+            minNotice: 1440,
+            maxAdvance: 60,
+            defaultBufferBefore: 0,
+            defaultBufferAfter: 15,
+          },
+          message: "No calendar events found in the last 4 weeks. Using default working hours.",
+        });
+      }
+
+      const suggestions = await analyseCalendarPatterns(events);
+      res.json({ suggestions, message: "AI analysed your calendar patterns and generated suggestions." });
+    } catch (error) {
+      console.error("Error analysing calendar:", error);
+      res.status(500).json({ error: "Failed to analyse calendar patterns" });
+    }
+  });
+
   // File Upload
   app.post("/api/uploads/request-url", async (req, res) => {
     try {
