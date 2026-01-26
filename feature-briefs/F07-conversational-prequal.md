@@ -16,6 +16,12 @@
 - **Custom questions UI now exists** — F04 R3 added a full questions editor to the event type form (add/edit/remove/reorder). R5 (Custom Questions Reminder) is now fully addressed: questions are configurable via the form UI and passed to the AI pre-qual chat.
 - **Questions field already works end-to-end** — Event types with questions trigger the chat step on the booking page, and `processPrequalChat()` uses them in the AI prompt. F04 provided the missing UI to actually configure these questions.
 
+### Impact from F05 Implementation
+
+- **Chat step now uses branded colors** — F05 applied `primaryColor` and `secondaryColor` from event types to all booking steps, including the chat step, via CSS custom properties (`--brand-primary`, `--brand-secondary`). Chat bubbles, buttons, and accent elements reflect the host's brand. F07 enhancements should maintain consistency with this branded styling.
+- **Client-side email validation deferred to F07** — F05 did not add client-side email validation on the info form. If F07 adds phone validation (R1), email validation should be added at the same time for consistency.
+- **Host info available** — F05 expanded the public API to include host name and avatar. The chat AI greeting could reference the host by name (e.g., "A few quick questions so Sarah can prep for your call").
+
 ---
 
 ## Current State
@@ -147,3 +153,11 @@ ALTER TABLE bookings ADD COLUMN guest_phone TEXT;
 - The document upload within chat reuses the same upload infrastructure (presigned URLs to object storage).
 - The summary step is important for booker confidence — they should see what the host will receive before confirming.
 - Phone validation should be lenient (international formats vary widely). A basic regex like `/^\+?[\d\s\-()]+$/` is sufficient.
+
+---
+
+## Dependencies & Implications from F05
+
+- **Chat step is already branded.** F05 applies CSS custom properties (`--brand-primary`, `--brand-secondary`) to all booking steps, including the chat step. F07 UI enhancements (file upload button, summary card, phone field) should use these custom properties to maintain visual consistency with the branded booking page.
+- **Client-side email validation is needed.** F05 explicitly deferred client-side email validation. When F07 adds phone validation (R1), email validation should be implemented alongside it on the info form in `client/src/pages/book.tsx`.
+- **Host name available for AI personalization.** F05 expanded the public event type API to include host firstName and lastName. The pre-qual AI prompt could reference the host name for a more personal greeting (e.g., "A few quick questions so Sarah can prepare for your call").

@@ -247,6 +247,18 @@ export type InsertAvailabilityRules = z.infer<typeof insertAvailabilityRulesSche
 export type CalendarToken = typeof calendarTokens.$inferSelect;
 export type InsertCalendarToken = z.infer<typeof insertCalendarTokenSchema>;
 
+// Host info exposed on public booking pages (safe fields only)
+export type EventTypeHost = {
+  firstName: string | null;
+  lastName: string | null;
+  profileImageUrl: string | null;
+};
+
+// Event type with host info for public booking pages
+export type EventTypeWithHost = EventType & {
+  host: EventTypeHost;
+};
+
 // Extended types for API responses
 export type BookingWithDetails = Booking & {
   eventType?: EventType;

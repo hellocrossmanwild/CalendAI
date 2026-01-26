@@ -30,10 +30,20 @@ F03 has implemented availability rules, satisfying the F03 dependency:
 - **Host timezone stored** — `availability_rules.timezone` is now stored per user. Can be used for host/booker timezone conversion.
 - **Configurable working hours** — `calculateAvailability()` now uses stored weekly hours instead of hardcoded 9-5, supporting multiple blocks per day and disabled days.
 
+### Impact from F05 Implementation
+
+F05 has implemented the **frontend portion** of timezone handling, partially satisfying R3:
+
+- **Timezone auto-detection implemented** — `Intl.DateTimeFormat().resolvedOptions().timeZone` detects the booker's timezone on page load in `client/src/pages/book.tsx`.
+- **Timezone selector UI implemented** — dropdown with 31 common timezones displayed on calendar and time steps.
+- **Timezone sent with booking request** — `guestTimezone` field added to `bookings` table in `shared/schema.ts` and stored on booking creation.
+- **Timezone passed to availability API** — the frontend sends the selected timezone when fetching availability slots, but the server does not yet use it for slot conversion.
+- **What F05 did NOT do:** Server-side timezone conversion. The availability endpoint still generates slots in server/host timezone. Slots are not adjusted to the booker's selected timezone. The timezone selector triggers a re-fetch, but returned slots remain in host timezone.
+
 **What remains for F06:**
-- **R3 (Timezone Handling):** Full timezone conversion between host and booker timezones. Availability endpoint needs `timezone` query param. Display timezone on booking page.
+- **R3 (Timezone Handling) — server-side only:** The availability endpoint needs to accept the `timezone` query param and convert slot times between host and booker timezones. The frontend work (detection, selector, display, sending timezone) is done by F05.
 - **R7 (Real-Time Availability):** Periodic refresh or optimistic UI not yet implemented.
-- **Frontend updates:** Timezone detection/display on booking page.
+- ~~**Frontend updates:** Timezone detection/display on booking page.~~ **DONE by F05.**
 
 ---
 
@@ -54,14 +64,14 @@ The availability and time selection system has been significantly improved by F0
 
 ### What's Missing vs PRD
 
-1. **Double-booking prevention** — check existing bookings before showing slot as available
-2. **Buffer time enforcement** — apply `bufferBefore` and `bufferAfter` from event type
-3. **Timezone detection/display** — show times in booker's timezone
-4. **Timezone conversion** — convert between booker timezone and host timezone
-5. **Minimum notice period** — configurable (default 24 hours)
-6. **Maximum advance booking** — configurable limit
+1. **Double-booking prevention** — ~~check existing bookings before showing slot as available~~ DONE (F02)
+2. **Buffer time enforcement** — ~~apply `bufferBefore` and `bufferAfter` from event type~~ DONE (F02)
+3. **Timezone detection/display** — ~~show times in booker's timezone~~ Frontend DONE (F05). Selector and display implemented.
+4. **Timezone conversion** — convert between booker timezone and host timezone (server-side, still needed)
+5. **Minimum notice period** — ~~configurable (default 24 hours)~~ DONE (F03)
+6. **Maximum advance booking** — ~~configurable limit~~ DONE (F03)
 7. **Real-time availability** — handle race conditions when two bookers view the same slot
-8. **Calendar integration** — check Google Calendar events (dependent on F02)
+8. **Calendar integration** — ~~check Google Calendar events (dependent on F02)~~ DONE (F02)
 
 ---
 
@@ -111,7 +121,9 @@ When generating available slots:
 
 ### R3: Timezone Handling
 
-**Backend:**
+> **Frontend: DONE (implemented in F05).** Timezone auto-detection via `Intl` API, selector dropdown with 31 timezones, timezone display on calendar/time steps, timezone sent with booking request, and `guestTimezone` stored on booking record. **Backend: NOT YET DONE.** Server-side slot conversion remains.
+
+**Backend (remaining work):**
 - Accept `timezone` query parameter on availability endpoint: `GET /api/public/availability/:slug?date=...&timezone=America/New_York`
 - Generate slots in the host's timezone (from availability rules or default)
 - Return slots with UTC timestamps and formatted display times in the booker's timezone
@@ -124,11 +136,11 @@ When generating available slots:
   }
   ```
 
-**Frontend (`client/src/pages/book.tsx`):**
-- Detect booker's timezone on page load: `Intl.DateTimeFormat().resolvedOptions().timeZone`
-- Pass timezone to availability API
-- Display: "Times shown in Eastern Time (ET)" below the time grid
-- Optionally allow timezone override (dropdown)
+**Frontend (`client/src/pages/book.tsx`) — DONE by F05:**
+- ~~Detect booker's timezone on page load: `Intl.DateTimeFormat().resolvedOptions().timeZone`~~ DONE
+- ~~Pass timezone to availability API~~ DONE
+- ~~Display: "Times shown in Eastern Time (ET)" below the time grid~~ DONE
+- ~~Optionally allow timezone override (dropdown)~~ DONE (31 timezone selector)
 
 ### R4: Minimum Notice Period
 
@@ -172,14 +184,14 @@ When generating available slots:
 
 ## Acceptance Criteria
 
-- [ ] Slots occupied by existing bookings show as unavailable
-- [ ] Double-booking is prevented at both display time and creation time
-- [ ] Buffer before/after times from event type are respected in slot generation
-- [ ] Booker's timezone is detected and displayed on the booking page
-- [ ] Time slots are shown in the booker's local timezone
-- [ ] Minimum notice period prevents booking too close to current time
-- [ ] Maximum advance period prevents booking too far in the future
-- [ ] Event type duration determines slot length (not hardcoded 30 min)
+- [x] Slots occupied by existing bookings show as unavailable (F02)
+- [x] Double-booking is prevented at both display time and creation time (F02)
+- [x] Buffer before/after times from event type are respected in slot generation (F02)
+- [x] Booker's timezone is detected and displayed on the booking page (F05)
+- [ ] Time slots are shown in the booker's local timezone (server-side conversion needed)
+- [x] Minimum notice period prevents booking too close to current time (F03)
+- [x] Maximum advance period prevents booking too far in the future (F03)
+- [x] Event type duration determines slot length (not hardcoded 30 min) (F02)
 - [ ] If a booking fails due to timing conflict, a clear error is shown
 - [ ] If no slots are available on a date, a helpful message is shown
 
@@ -191,3 +203,12 @@ When generating available slots:
 - Google Calendar event conflict checking is implemented in `calculateAvailability()`.
 - With F03 complete, use stored availability rules instead of hardcoded hours.
 - Timezone handling is subtle — use a library like `date-fns-tz` or handle conversions carefully with native `Intl` APIs.
+
+---
+
+## Dependencies & Implications from F05
+
+- **F05 completed the frontend portion of R3 (Timezone Handling).** The booking page now auto-detects the booker's timezone, displays a timezone selector with 31 options, shows the selected timezone on calendar and time steps, and sends the timezone with the booking request. The `guestTimezone` field was added to the bookings schema.
+- **F06's remaining R3 work is server-side only.** The availability endpoint (`GET /api/public/availability/:slug`) needs to accept a `timezone` query parameter and convert generated slots from the host's timezone to the booker's timezone. The frontend already sends this parameter.
+- **F05's timezone selector triggers availability re-fetch.** When the booker changes their timezone in the selector, the frontend re-fetches slots. Once F06 implements server-side conversion, slots will automatically update to the correct timezone.
+- **`guestTimezone` is stored on bookings.** F05 added this column to `shared/schema.ts` and stores it on booking creation. F06 or downstream features can use this field for timezone-aware communications and displays.

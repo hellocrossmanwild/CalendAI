@@ -45,6 +45,13 @@ F01 established a token-based verification pattern (generate token → store in 
 - **`sendEmail()` stub still in place** — F02 did not modify the email stub. F09 still needs to replace it with real email delivery.
 - **Booking deletion triggers calendar cleanup** — F02's booking deletion route removes the Google Calendar event. R4's cancellation emails should be sent from the same code path.
 
+### Impact from F05 Implementation
+
+- **False "email sent" claim removed** — F05 removed the misleading "A confirmation email has been sent to {email}" text from the booking confirmation page in `client/src/pages/book.tsx`. The confirmation page now shows truthful messaging with booking details (date, time, event type, host name), an ICS file download button, and a Google Calendar link.
+- **When F09 implements real email delivery, the confirmation page should be updated** — restore an email confirmation message (e.g., "A confirmation email has been sent to {email}") in the confirmation step of `book.tsx`. The F05 confirmation layout is clean and ready for this addition.
+- **R5 is partially addressed by F05** — F05 fixed the misleading text and added booking summary details. F09's R5 work is reduced to adding the "email sent" message once email delivery is functional, and optionally adding "Check your spam folder" guidance.
+- **ICS download and Google Calendar link on confirmation** — F05 added these to the confirmation page, reducing the need for email-only calendar attachment. However, confirmation emails should still include calendar details for bookers who navigate away.
+
 ---
 
 ## Current State
@@ -54,7 +61,7 @@ There is **zero email infrastructure** in the codebase (F01 auth emails are stub
 - No email service configured (no SendGrid, Postmark, SES, Nodemailer, etc.)
 - No email templates
 - No email sending functions
-- The confirmation page at `client/src/pages/book.tsx:239` misleadingly says "A confirmation email has been sent to {email}" — this is false
+- ~~The confirmation page at `client/src/pages/book.tsx` misleadingly says "A confirmation email has been sent to {email}" — this is false~~ **FIXED by F05** — the false claim has been removed; confirmation page now shows truthful booking details with ICS download and Google Calendar link
 - No notification to hosts on new bookings
 - No meeting reminders
 - No reschedule/cancel links in any emails
@@ -202,11 +209,14 @@ sendHostNotificationEmail(booking, eventType, host).catch(err =>
 
 ### R5: Fix Confirmation Page
 
+> **Status: PARTIALLY DONE (fixed by F05).** F05 removed the false "email sent" claim and added booking summary details (date, time, event type, host name), ICS file download, and Google Calendar link to the confirmation page. **Remaining work:** Once F09 implements real email delivery, add an accurate "A confirmation email has been sent to {email}" message and "Check your spam folder" note.
+
 Update `client/src/pages/book.tsx` confirmation step:
-- Only show "A confirmation email has been sent" if email sending is configured
+- ~~Only show "A confirmation email has been sent" if email sending is configured~~ Misleading text removed by F05
 - Show booking reference number
-- Show "Check your spam folder if you don't see it" note
-- Include all booking details in the confirmation view
+- Show "Check your spam folder if you don't see it" note (add when email is live)
+- ~~Include all booking details in the confirmation view~~ DONE by F05
+- **NEW:** When F09 email delivery is functional, add "A confirmation email has been sent to {email}" message back to the confirmation step
 
 ### R6: Email Notification Preferences (Settings)
 
@@ -287,3 +297,12 @@ CREATE TABLE notification_preferences (
 - For local development, consider using a service like Mailtrap or just logging email content to console.
 - Email templates should be responsive and work across major email clients (Gmail, Outlook, Apple Mail).
 - Consider using a template library like `mjml` for responsive email HTML, or keep templates simple with inline CSS.
+
+---
+
+## Dependencies & Implications from F05
+
+- **F05 removed the false "email sent" claim from the confirmation page.** The booking confirmation step in `client/src/pages/book.tsx` no longer claims an email was sent. When F09 implements real email delivery, the confirmation page should be updated to add an accurate "A confirmation email has been sent to {email}" message.
+- **Confirmation page now shows booking details.** F05 added date, time, event type, host name, ICS download, and Google Calendar link to the confirmation page. F09's R5 scope is reduced to adding the email-related messaging once delivery is functional.
+- **`guestTimezone` is now stored on bookings.** F05 added this field. Email templates can use it to format times in the booker's timezone (e.g., "Your call is on Monday at 2:00 PM EST").
+- **Host info available on public API.** F05 expanded the public event type endpoint to include host firstName, lastName, and profileImageUrl. Email templates can reference host data for personalization.

@@ -22,6 +22,13 @@
 - `validatePasswordStrength()` function (backend, in `server/routes.ts`)
 - `isValidEmail()` function (backend, in `server/routes.ts`)
 
+### Impact from F05 Implementation
+
+- **Branding is now applied on the public booking page** — F05 applies `primaryColor` and `secondaryColor` from event types to all five booking steps (calendar, time, info, chat, confirm) via CSS custom properties (`--brand-primary`, `--brand-secondary`). When F13 adds branding settings (R6) to the settings page, changes to brand colors will have immediate visible impact on all public booking pages.
+- **Per-event-type branding already exists** — F04 added `primaryColor`, `secondaryColor`, and `logo` fields to `event_types`, and F05 applies them on the booking page. F13's R6 (Branding Settings) should establish user-level default branding that applies to all event types without their own override.
+- **Host info displayed on booking page** — F05 shows the host's name and avatar on the booking page. When F13's R1 (Profile Editing) allows changing name and profile photo, the changes will be reflected on all public booking pages via the expanded public API endpoint.
+- **Timezone selector on booking page** — F05 added timezone detection and a 31-timezone selector for bookers. F13's R2 (Timezone Configuration) sets the host's timezone, which is used by the availability engine. These are complementary: host timezone (F13) determines when slots are generated, booker timezone (F05) determines how they are displayed.
+
 ### Impact from F02 Implementation
 
 - **Calendar section in settings is now functional** — F02 replaced the stub calendar connection with a real Google OAuth flow. The settings page now: redirects to Google OAuth via `GET /api/calendar/auth`, handles the callback redirect with success/error toasts, displays connected calendar list from `listUserCalendars()`, and supports disconnect.
@@ -128,11 +135,13 @@ Add "Notifications" section:
 
 ### R6: Branding Settings
 
+> **Note:** F05 now applies `primaryColor` and `secondaryColor` from event types to the booking page using CSS custom properties. Branding changes made via F13's settings will have immediate visible impact on public booking pages. F04 established per-event-type branding fields; F13 should add user-level defaults.
+
 Add "Branding" section:
 - Logo upload (shows preview, uses existing upload infrastructure)
 - Primary color picker (hex input + visual picker)
 - Secondary color picker
-- Preview: "This is how your booking page will look"
+- Preview: "This is how your booking page will look" — F05's booking page already applies colors, so a live preview can demonstrate the effect
 - Store on user profile or in a dedicated `branding` table
 - Applied to all event types that don't have their own branding override
 
@@ -226,3 +235,12 @@ PATCH  /api/branding               → Update branding settings
 - Profile photo upload can reuse the existing file upload infrastructure (presigned URLs to object storage).
 - Timezone is important to get right — it affects availability, calendar events, email times, and dashboard display. Use IANA timezone identifiers (e.g., "America/New_York").
 - The branding settings here set defaults; individual event types can override via F04.
+
+---
+
+## Dependencies & Implications from F05
+
+- **Branding settings will have immediate visible impact.** F05 applies `primaryColor` and `secondaryColor` from event types to the booking page via CSS custom properties (`--brand-primary`, `--brand-secondary`) across all five booking steps. When F13 allows hosts to change brand colors, the public booking page will reflect those changes immediately.
+- **Host profile changes will be visible on booking pages.** F05 displays the host's name (firstName, lastName) and avatar (profileImageUrl) on the booking page header. F13's R1 (Profile Editing) changes to name and photo will propagate to all public booking pages via the expanded `GET /api/public/event-types/:slug` endpoint.
+- **User-level vs event-type-level branding.** F04 added per-event-type branding fields, and F05 applies them. F13's R6 should add user-level default branding. The booking page should apply: event-type branding if set, otherwise user-level defaults, otherwise CalendAI theme defaults.
+- **Booker timezone (F05) complements host timezone (F13 R2).** F05 detects and stores the booker's timezone. F13's R2 stores the host's timezone. Together these enable proper timezone conversion when F06 completes server-side conversion.
