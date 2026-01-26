@@ -5,6 +5,7 @@ import { insertEventTypeSchema, insertBookingSchema } from "@shared/schema";
 import { enrichLead, generateMeetingBrief, processPrequalChat } from "./ai-service";
 import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
 import { addHours, addMinutes, setHours, setMinutes, format, startOfDay, isBefore } from "date-fns";
+import bcrypt from "bcrypt";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -19,7 +20,70 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Auth routes - user info
+  // Auth routes
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const { username, password, firstName, lastName } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+
+      const existing = await storage.getUserByUsername(username);
+      if (existing) {
+        return res.status(400).json({ error: "Username already taken" });
+      }
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const user = await storage.createUser({
+        username,
+        password: hashedPassword,
+        firstName: firstName || null,
+        lastName: lastName || null,
+      });
+
+      (req.session as any).userId = user.id;
+      res.json({ id: user.id, username: user.username, firstName: user.firstName, lastName: user.lastName });
+    } catch (error) {
+      console.error("Registration error:", error);
+      res.status(500).json({ error: "Registration failed" });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required" });
+      }
+
+      const user = await storage.getUserByUsername(username);
+      if (!user || !user.password) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      const valid = await bcrypt.compare(password, user.password);
+      if (!valid) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      (req.session as any).userId = user.id;
+      res.json({ id: user.id, username: user.username, firstName: user.firstName, lastName: user.lastName });
+    } catch (error) {
+      console.error("Login error:", error);
+      res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  app.post("/api/auth/logout", async (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ error: "Logout failed" });
+      }
+      res.clearCookie("connect.sid");
+      res.json({ success: true });
+    });
+  });
+
   app.get("/api/auth/user", async (req, res) => {
     if (!req.user) {
       return res.status(401).json({ error: "Not authenticated" });

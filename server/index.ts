@@ -1,7 +1,11 @@
 import express, { type Request, Response, NextFunction } from "express";
+import session from "express-session";
+import pgSession from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { storage } from "./storage";
+import { pool } from "./db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -9,6 +13,20 @@ const httpServer = createServer(app);
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
+  }
+}
+
+declare module "express-session" {
+  interface SessionData {
+    userId: string;
+  }
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: any;
+    }
   }
 }
 
@@ -21,6 +39,39 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+const PgStore = pgSession(session);
+app.use(
+  session({
+    store: new PgStore({
+      pool: pool,
+      tableName: "sessions",
+      createTableIfMissing: true,
+    }),
+    secret: process.env.SESSION_SECRET || "calendai-secret-key",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    },
+  })
+);
+
+// Auth middleware - set req.user from session
+app.use(async (req, _res, next) => {
+  if (req.session.userId) {
+    try {
+      const user = await storage.getUser(req.session.userId);
+      if (user) {
+        req.user = user;
+      }
+    } catch (error) {
+      console.error("Error fetching user from session:", error);
+    }
+  }
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {

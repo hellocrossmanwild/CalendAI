@@ -29,6 +29,8 @@ import { users } from "@shared/models/auth";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  createUser(userData: { username: string; password: string; firstName?: string | null; lastName?: string | null }): Promise<User>;
   upsertUser(user: InsertUser): Promise<User>;
   
   getEventTypes(userId: string): Promise<EventType[]>;
@@ -69,6 +71,16 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1);
+    return user;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username)).limit(1);
+    return user;
+  }
+
+  async createUser(userData: { username: string; password: string; firstName?: string | null; lastName?: string | null }): Promise<User> {
+    const [user] = await db.insert(users).values(userData).returning();
     return user;
   }
 
