@@ -22,6 +22,7 @@ import BriefsPage from "@/pages/briefs";
 import SettingsPage from "@/pages/settings";
 import BookPage from "@/pages/book";
 import OnboardingPage from "@/pages/onboarding";
+import EventTypeAICreatePage from "@/pages/event-type-ai-create";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
   const style = {
@@ -55,6 +56,7 @@ function AuthenticatedRoutes() {
         <Route path="/dashboard" component={DashboardPage} />
         <Route path="/event-types" component={EventTypesPage} />
         <Route path="/event-types/new" component={EventTypeFormPage} />
+        <Route path="/event-types/new/ai" component={EventTypeAICreatePage} />
         <Route path="/event-types/:id" component={EventTypeFormPage} />
         <Route path="/bookings" component={BookingsPage} />
         <Route path="/bookings/:id" component={BookingDetailPage} />

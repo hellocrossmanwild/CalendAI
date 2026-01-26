@@ -16,6 +16,10 @@
 - **Calendar event description available** — F02's `createCalendarEvent()` generates event descriptions with guest info. R3 (Lead Score Display) mentions including lead score in calendar event descriptions — this can be done by enhancing the description template in `server/calendar-service.ts` to include the score after enrichment completes.
 - **Booking creation flow is the integration point** — F02's booking creation in `POST /api/public/book` (in `server/routes.ts`) is where R2 (Automatic Enrichment) should fire-and-forget the `enrichAndScore()` call. The calendar event is also created here, so enrichment data could be included if it completes fast enough (or the calendar event could be updated later).
 
+### Impact from F04 Implementation
+
+- **Website scanner could be reused** — F04's `server/website-scanner.ts` performs website fetching and AI-powered content extraction. The `scanWebsite()` function or its HTML extraction helpers could be reused in R5 (Enhanced AI Enrichment) to fetch real company website data instead of relying solely on AI inference from email domains.
+
 ---
 
 ## Current State

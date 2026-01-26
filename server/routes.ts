@@ -2,7 +2,8 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertEventTypeSchema, insertBookingSchema } from "@shared/schema";
-import { enrichLead, generateMeetingBrief, processPrequalChat } from "./ai-service";
+import { enrichLead, generateMeetingBrief, processPrequalChat, processEventTypeCreation } from "./ai-service";
+import { scanWebsite } from "./website-scanner";
 import { getGoogleAuthUrl, exchangeCodeForTokens, calculateAvailability, createCalendarEvent, deleteCalendarEvent, listUserCalendars } from "./calendar-service";
 import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
 import { addMinutes } from "date-fns";
@@ -844,6 +845,37 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error analysing calendar:", error);
       res.status(500).json({ error: "Failed to analyse calendar patterns" });
+    }
+  });
+
+  // AI-Assisted Event Type Creation (F04)
+  app.post("/api/ai/create-event-type", requireAuth, async (req, res) => {
+    try {
+      const { messages, calendarConnected } = req.body;
+      if (!messages || !Array.isArray(messages)) {
+        return res.status(400).json({ error: "Messages array is required" });
+      }
+
+      const result = await processEventTypeCreation(messages, calendarConnected);
+      res.json(result);
+    } catch (error) {
+      console.error("Error in AI event type creation:", error);
+      res.status(500).json({ error: "Failed to process event type creation" });
+    }
+  });
+
+  app.post("/api/ai/scan-website", requireAuth, async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ error: "URL is required" });
+      }
+
+      const result = await scanWebsite(url);
+      res.json(result);
+    } catch (error) {
+      console.error("Error scanning website:", error);
+      res.status(500).json({ error: "Failed to scan website" });
     }
   });
 

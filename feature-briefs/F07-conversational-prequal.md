@@ -11,6 +11,11 @@
 - **No direct dependency on F01**. The pre-qual chat is a public-facing feature that doesn't require authentication.
 - **Email validation utility available** — F01 added `isValidEmail()` in `server/routes.ts` which could be reused if AI conversation needs to validate email format (R4 stretch goal of collecting name/email conversationally).
 
+### Impact from F04 Implementation
+
+- **Custom questions UI now exists** — F04 R3 added a full questions editor to the event type form (add/edit/remove/reorder). R5 (Custom Questions Reminder) is now fully addressed: questions are configurable via the form UI and passed to the AI pre-qual chat.
+- **Questions field already works end-to-end** — Event types with questions trigger the chat step on the booking page, and `processPrequalChat()` uses them in the AI prompt. F04 provided the missing UI to actually configure these questions.
+
 ---
 
 ## Current State
