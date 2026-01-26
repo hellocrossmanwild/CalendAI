@@ -3,8 +3,9 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertEventTypeSchema, insertBookingSchema } from "@shared/schema";
 import { enrichLead, generateMeetingBrief, processPrequalChat } from "./ai-service";
+import { getGoogleAuthUrl, exchangeCodeForTokens, calculateAvailability, createCalendarEvent, deleteCalendarEvent, listUserCalendars } from "./calendar-service";
 import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
-import { addHours, addMinutes, setHours, setMinutes, format, startOfDay, isBefore } from "date-fns";
+import { addMinutes } from "date-fns";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 
@@ -540,6 +541,14 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Booking not found" });
       }
 
+      // Delete Google Calendar event if one exists
+      if (booking.calendarEventId) {
+        const deleted = await deleteCalendarEvent(req.user!.id, booking.calendarEventId);
+        if (!deleted) {
+          console.warn(`Failed to delete Google Calendar event ${booking.calendarEventId} for booking ${booking.id}`);
+        }
+      }
+
       await storage.deleteBooking(parseInt(req.params.id));
       res.status(204).send();
     } catch (error) {
@@ -619,33 +628,72 @@ export async function registerRoutes(
     }
   });
 
-  // Calendar Integration (stub - would need real Google OAuth)
-  app.get("/api/calendar/status", requireAuth, async (req, res) => {
+  // Calendar Integration - Google Calendar OAuth
+  app.get("/api/calendar/auth", requireAuth, async (req, res) => {
     try {
-      const token = await storage.getCalendarToken(req.user!.id);
-      res.json({
-        connected: !!token,
-        email: token ? `${req.user!.email}` : undefined,
-      });
+      const redirectUri = process.env.GOOGLE_CALENDAR_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/calendar/callback`;
+      const state = crypto.randomBytes(32).toString("hex");
+      (req.session as any).calendarOAuthState = state;
+      const url = getGoogleAuthUrl(redirectUri, state);
+      res.json({ url });
     } catch (error) {
-      res.json({ connected: false });
+      console.error("Calendar auth error:", error);
+      res.status(500).json({ error: "Failed to generate auth URL" });
     }
   });
 
-  app.get("/api/calendar/connect", requireAuth, async (req, res) => {
-    // In production, this would redirect to Google OAuth
-    // For now, simulate connection by creating a placeholder token
+  app.get("/api/calendar/callback", async (req, res) => {
     try {
+      const { code, state } = req.query;
+      if (!code) {
+        return res.redirect("/settings?error=calendar_auth_failed");
+      }
+
+      const userId = (req.session as any).userId;
+      if (!userId) {
+        return res.redirect("/auth?error=not_authenticated");
+      }
+
+      // Validate OAuth state parameter to prevent CSRF
+      const expectedState = (req.session as any).calendarOAuthState;
+      if (!state || state !== expectedState) {
+        return res.redirect("/settings?error=calendar_auth_failed");
+      }
+      delete (req.session as any).calendarOAuthState;
+
+      const redirectUri = process.env.GOOGLE_CALENDAR_REDIRECT_URI || `${req.protocol}://${req.get("host")}/api/calendar/callback`;
+      const tokens = await exchangeCodeForTokens(code as string, redirectUri);
+
       await storage.upsertCalendarToken({
-        userId: req.user!.id,
-        accessToken: "placeholder_token",
-        refreshToken: null,
-        expiresAt: null,
+        userId,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresAt: tokens.expiresAt,
         calendarId: "primary",
       });
-      res.json({ connected: true, message: "Calendar connected successfully" });
+
+      res.redirect("/settings?calendar=connected");
     } catch (error) {
-      res.status(500).json({ error: "Failed to connect calendar" });
+      console.error("Calendar callback error:", error);
+      res.redirect("/settings?error=calendar_auth_failed");
+    }
+  });
+
+  app.get("/api/calendar/status", requireAuth, async (req, res) => {
+    try {
+      const token = await storage.getCalendarToken(req.user!.id);
+      if (!token) {
+        return res.json({ connected: false });
+      }
+
+      const calendars = await listUserCalendars(req.user!.id);
+      res.json({
+        connected: true,
+        email: req.user!.email,
+        calendars,
+      });
+    } catch (error) {
+      res.json({ connected: false });
     }
   });
 
@@ -692,38 +740,18 @@ export async function registerRoutes(
 
       const dateStr = req.query.date as string;
       const date = dateStr ? new Date(dateStr) : new Date();
-      
-      // Generate available time slots (simplified - in production would check calendar)
-      const slots: { time: string; available: boolean }[] = [];
-      const startHour = 9;
-      const endHour = 17;
-      const interval = 30;
 
-      for (let hour = startHour; hour < endHour; hour++) {
-        for (let minute = 0; minute < 60; minute += interval) {
-          const slotTime = setMinutes(setHours(date, hour), minute);
-          
-          // Don't show past times
-          if (isBefore(slotTime, new Date())) {
-            continue;
-          }
-
-          slots.push({
-            time: format(slotTime, "h:mm a"),
-            available: true,
-          });
-        }
-      }
-
+      const slots = await calculateAvailability(eventType.userId, eventType.id, date);
       res.json(slots);
     } catch (error) {
+      console.error("Error fetching availability:", error);
       res.status(500).json({ error: "Failed to fetch availability" });
     }
   });
 
   app.post("/api/public/book", async (req, res) => {
     try {
-      const { eventTypeSlug, date, time, name, email, company, notes, chatHistory, documents } = req.body;
+      const { eventTypeSlug, date, time, name, email, company, notes, timezone: clientTimezone, chatHistory, documents } = req.body;
 
       const eventType = await storage.getEventTypeBySlug(eventTypeSlug);
       if (!eventType || !eventType.isActive) {
@@ -739,6 +767,19 @@ export async function registerRoutes(
       startTime.setHours(adjustedHours, minutes, 0, 0);
       const endTime = addMinutes(startTime, eventType.duration);
 
+      // Prevent double-booking: check for existing confirmed bookings in this time slot
+      const existingBookings = await storage.getBookingsByDateRange(
+        eventType.userId,
+        startTime,
+        endTime
+      );
+      const hasConflict = existingBookings.some((b) => {
+        return b.startTime < endTime && b.endTime > startTime;
+      });
+      if (hasConflict) {
+        return res.status(409).json({ error: "This time slot is no longer available" });
+      }
+
       // Create booking
       const booking = await storage.createBooking({
         eventTypeId: eventType.id,
@@ -749,7 +790,7 @@ export async function registerRoutes(
         startTime,
         endTime,
         status: "confirmed",
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        timezone: clientTimezone || "UTC",
         notes: notes || null,
       });
 
@@ -773,7 +814,26 @@ export async function registerRoutes(
         }
       }
 
-      res.status(201).json(booking);
+      // Create Google Calendar event if calendar is connected
+      const calendarEventId = await createCalendarEvent(
+        eventType.userId,
+        {
+          guestName: name,
+          guestEmail: email,
+          guestCompany: company || null,
+          startTime,
+          endTime,
+          timezone: clientTimezone || "UTC",
+          notes: notes || null,
+        },
+        eventType.name
+      );
+
+      if (calendarEventId) {
+        await storage.updateBooking(booking.id, { calendarEventId });
+      }
+
+      res.status(201).json({ ...booking, calendarEventId: calendarEventId || booking.calendarEventId });
     } catch (error) {
       console.error("Error creating booking:", error);
       res.status(400).json({ error: "Failed to create booking" });

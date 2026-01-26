@@ -101,6 +101,7 @@ export const calendarTokens = pgTable("calendar_tokens", {
   refreshToken: text("refresh_token"),
   expiresAt: timestamp("expires_at"),
   calendarId: text("calendar_id").default("primary"),
+  selectedCalendars: jsonb("selected_calendars").$type<string[]>().default(["primary"]),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
