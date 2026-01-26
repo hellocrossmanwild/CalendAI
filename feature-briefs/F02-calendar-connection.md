@@ -2,6 +2,7 @@
 
 **Priority:** Critical
 **Estimated Scope:** Large
+**Status:** IMPLEMENTED
 **Dependencies:** F01 (user must be authenticated) — **SATISFIED**
 
 ---

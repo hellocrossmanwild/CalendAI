@@ -61,6 +61,7 @@ export interface IStorage {
   getBooking(id: number): Promise<Booking | undefined>;
   getBookingWithDetails(id: number): Promise<any>;
   getBookingsWithDetails(userId: string): Promise<any[]>;
+  getBookingsByDateRange(userId: string, startDate: Date, endDate: Date): Promise<Booking[]>;
   createBooking(data: InsertBooking): Promise<Booking>;
   updateBooking(id: number, data: Partial<InsertBooking>): Promise<Booking | undefined>;
   deleteBooking(id: number): Promise<void>;
@@ -209,6 +210,21 @@ export class DatabaseStorage implements IStorage {
     );
 
     return bookingsWithDetails;
+  }
+
+  async getBookingsByDateRange(userId: string, startDate: Date, endDate: Date): Promise<Booking[]> {
+    return db
+      .select()
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.userId, userId),
+          gte(bookings.startTime, startDate),
+          lt(bookings.startTime, endDate),
+          eq(bookings.status, "confirmed")
+        )
+      )
+      .orderBy(asc(bookings.startTime));
   }
 
   async createBooking(data: InsertBooking): Promise<Booking> {

@@ -2,7 +2,7 @@
 
 **Priority:** High
 **Estimated Scope:** Medium-Large
-**Dependencies:** F06 (availability for rescheduling), F09 (email notifications with reschedule/cancel links), F02 (calendar event updates)
+**Dependencies:** F06 (availability for rescheduling), F09 (email notifications with reschedule/cancel links), F02 (calendar event updates) — **SATISFIED**
 
 ---
 
@@ -13,13 +13,22 @@
 - **`sendEmail()` stub ready** — notification emails for reschedule/cancel (R2–R4) can use the existing stub, which F09 will later replace with real delivery.
 - **Storage pattern for token CRUD** — `createToken()`, `getToken()`, `markTokenUsed()` methods in `server/storage.ts` demonstrate the pattern for booking token management.
 
+### Impact from F02 Implementation
+
+- **F02 dependency is satisfied** — Google Calendar event CRUD is fully implemented.
+- **`deleteCalendarEvent()` available and wired in** — F02 already calls `deleteCalendarEvent()` in the `DELETE /api/bookings/:id` route when a booking has a `calendarEventId`. R2 (Public Cancel Page) can use the same function for booker-initiated cancellation.
+- **`createCalendarEvent()` available for reschedule** — R3 (Reschedule) can implement reschedule as: delete old event + create new event with updated times, or future work could add an `updateCalendarEvent()` function.
+- **`calculateAvailability()` available** — R3's reschedule flow needs to show available slots, which is already implemented via `calculateAvailability()` in `server/calendar-service.ts`.
+- **`calendarEventId` stored on bookings** — F02 stores the Google Calendar event ID on the booking record, so reschedule/cancel operations can reference it.
+- **Write-time double-booking prevention** — F02 added conflict checking at booking creation time (HTTP 409). Reschedule should use the same check before confirming the new time.
+
 ---
 
 ## Current State
 
 Cancellation is minimal and reschedule is absent:
 
-- **Host cancel:** `DELETE /api/bookings/:id` sets booking status to "cancelled" (`server/routes.ts:193-206`, `server/storage.ts:197-199`)
+- **Host cancel:** `DELETE /api/bookings/:id` sets booking status to "cancelled" and deletes the Google Calendar event if one exists (`server/routes.ts`)
 - **Frontend:** Cancel button with confirmation dialog on bookings page (`client/src/pages/bookings.tsx`)
 - **No booker-facing cancel** — bookers have no way to cancel their own booking
 - **No reschedule at all** — no endpoint, UI, or flow for rescheduling
@@ -36,7 +45,7 @@ Cancellation is minimal and reschedule is absent:
 4. **Host reschedule** — host can reschedule from dashboard
 5. **Minimum notice period** — configurable cancellation/reschedule deadline
 6. **Notification to both parties** — emails on reschedule and cancel
-7. **Calendar event updates** — update/remove Google Calendar events
+7. **Calendar event updates** — deletion is implemented (F02); reschedule updates (delete + recreate) still needed
 8. **Cancellation reason** — optional field
 
 ---

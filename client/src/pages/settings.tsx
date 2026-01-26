@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Calendar, Link as LinkIcon, Copy, ExternalLink, Loader2, CheckCircle, AlertCircle, User, LogOut } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -19,6 +19,7 @@ export default function SettingsPage() {
   const { data: calendarStatus, isLoading: calendarLoading } = useQuery<{
     connected: boolean;
     email?: string;
+    calendars?: { id: string; summary: string; primary: boolean }[];
   }>({
     queryKey: ["/api/calendar/status"],
   });
@@ -29,16 +30,12 @@ export default function SettingsPage() {
 
   const connectCalendarMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch("/api/calendar/connect");
+      const response = await fetch("/api/calendar/auth", { credentials: "include" });
       const data = await response.json();
       if (data.url) {
         window.location.href = data.url;
       }
       return data;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/calendar/status"] });
-      toast({ title: "Calendar connected successfully" });
     },
     onError: (error: Error) => {
       toast({ title: "Failed to connect calendar", variant: "destructive" });
@@ -54,6 +51,19 @@ export default function SettingsPage() {
       toast({ title: "Calendar disconnected" });
     },
   });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("calendar") === "connected") {
+      toast({ title: "Google Calendar connected successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/calendar/status"] });
+      // Clean up URL
+      window.history.replaceState({}, "", "/settings");
+    } else if (params.get("error") === "calendar_auth_failed") {
+      toast({ title: "Failed to connect calendar", variant: "destructive" });
+      window.history.replaceState({}, "", "/settings");
+    }
+  }, [toast]);
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -140,6 +150,20 @@ export default function SettingsPage() {
                   Disconnect
                 </Button>
               </div>
+              {calendarStatus.calendars && calendarStatus.calendars.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium mb-2">Synced calendars</p>
+                  <div className="space-y-1">
+                    {calendarStatus.calendars.map((cal) => (
+                      <div key={cal.id} className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Calendar className="h-3 w-3" />
+                        <span>{cal.summary}</span>
+                        {cal.primary && <Badge variant="secondary" className="text-xs">Primary</Badge>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-4">

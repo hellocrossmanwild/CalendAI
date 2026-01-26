@@ -2,7 +2,7 @@
 
 **Priority:** Medium
 **Estimated Scope:** Medium
-**Dependencies:** F02 (Calendar Connection must be functional to analyse calendar patterns)
+**Dependencies:** F02 (Calendar Connection must be functional to analyse calendar patterns) — **SATISFIED**
 
 ---
 
@@ -12,6 +12,15 @@
 - **`emailVerified` field available** — could optionally gate onboarding behind email verification.
 - **`updateUser()` storage method available** — can be used to store timezone and other user preferences set during onboarding.
 - **User model now has `emailVerified` field** — schema at `shared/models/auth.ts` has been expanded; further additions (timezone, companyName) will follow in F13.
+
+### Impact from F02 Implementation
+
+- **F02 dependency is satisfied** — Google Calendar OAuth, token refresh, event fetching, and availability calculation are fully implemented.
+- **`calculateAvailability()` exists** — `server/calendar-service.ts` already calculates available slots by checking Google Calendar events and CalendAI bookings against 9am-5pm working hours with buffer support. F03 needs to replace the hardcoded 9-5 hours with user-configurable availability rules.
+- **`getCalendarEvents()` available** — F03's AI calendar analysis (R2) can use this function to fetch 2-4 weeks of events for pattern detection.
+- **`getBookingsByDateRange()` in storage** — available for querying existing bookings when calculating availability.
+- **Buffer enforcement implemented** — `calculateAvailability()` already applies `bufferBefore` and `bufferAfter` from event types.
+- **Calendar connection UI in settings** — F03's onboarding wizard (R3, Step 1) can check calendar connection status via `GET /api/calendar/status`.
 
 ---
 
@@ -23,7 +32,7 @@ This feature does not exist at all. There is:
 - No calendar analysis logic
 - No AI-driven availability suggestions
 - No availability rules configuration
-- Availability is hardcoded to 9am-5pm, 30-minute intervals (`server/routes.ts:354-373`)
+- Availability is calculated via `calculateAvailability()` in `server/calendar-service.ts`, which checks Google Calendar events and CalendAI bookings against default 9am-5pm working hours with buffer support. However, there are no configurable availability rules — the 9am-5pm hours and 30-minute intervals are hardcoded constants.
 - No working hours, excluded days, or lunch breaks stored anywhere
 
 ### What's Missing vs PRD
@@ -103,14 +112,14 @@ Create a new page/flow at `/onboarding` that users see after first signup:
 
 ### R4: Availability Rules Applied to Slot Generation
 
-Update `GET /api/public/availability/:slug` to:
+Update `calculateAvailability()` in `server/calendar-service.ts` (which already handles Google Calendar events, CalendAI bookings, and buffer enforcement) to:
 1. Look up the host's `availability_rules` for the event type's user
 2. Check if the requested date is an enabled day
-3. Generate slots only within the configured hours for that day
+3. Generate slots only within the configured hours for that day (replacing the hardcoded `WORKING_HOURS_START = 9` and `WORKING_HOURS_END = 17` constants)
 4. Apply minimum notice period (e.g., can't book within 24 hours)
 5. Apply maximum advance booking limit
-6. Apply buffers from availability rules + event type overrides
-7. Then check against calendar events and existing bookings (from F02)
+6. Apply buffers from availability rules + event type overrides (buffer enforcement already exists)
+7. Calendar event checking and double-booking prevention are already implemented by F02
 
 ### R5: Settings Integration
 
@@ -168,6 +177,6 @@ POST   /api/availability-rules/analyse → Trigger AI analysis of calendar (retu
 
 ## Notes
 
-- If F02 (Calendar Connection) is not complete, the AI analysis can be skipped and the user manually configures availability in the editor.
+- F02 (Calendar Connection) is complete — AI analysis can use `getCalendarEvents()` to fetch real calendar data for pattern detection.
 - The availability rules should be the single source of truth for what hours are bookable; event type buffers are applied on top.
 - Timezone is critical here — store the user's timezone and convert all slot calculations correctly.

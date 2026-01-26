@@ -12,6 +12,13 @@
 - **`updateUser()` method available** — useful when F13 adds `companyName` to the user model, which R1 needs to display on the booking page.
 - **Profile image from Google OAuth** — users who sign in via Google have `profileImageUrl` set automatically, which can be displayed as the host photo on the booking page (R1).
 
+### Impact from F02 Implementation
+
+- **Real availability now shown** — F02 replaced the hardcoded 9am-5pm availability with `calculateAvailability()` that checks Google Calendar events and CalendAI bookings. The booking page already shows real available/unavailable slots.
+- **Client timezone accepted** — F02 updated `POST /api/public/book` to accept `timezone` from the request body (`clientTimezone || "UTC"`). R3 (Timezone Detection & Display) can send the detected timezone with the booking request — the backend plumbing is ready.
+- **Google Calendar events created on booking** — F02 creates a Google Calendar event with Google Meet link when a booking is confirmed. The confirmation screen (R5) can now accurately reference the calendar invite.
+- **Double-booking prevented** — F02 added write-time conflict checking (HTTP 409), so the booking page should handle this error gracefully in R5.
+
 ---
 
 ## Current State

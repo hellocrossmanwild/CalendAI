@@ -22,6 +22,12 @@
 - `validatePasswordStrength()` function (backend, in `server/routes.ts`)
 - `isValidEmail()` function (backend, in `server/routes.ts`)
 
+### Impact from F02 Implementation
+
+- **Calendar section in settings is now functional** — F02 replaced the stub calendar connection with a real Google OAuth flow. The settings page now: redirects to Google OAuth via `GET /api/calendar/auth`, handles the callback redirect with success/error toasts, displays connected calendar list from `listUserCalendars()`, and supports disconnect.
+- **`selectedCalendars` schema field exists** — F02 added a `selectedCalendars` jsonb field to `calendar_tokens` for future multi-calendar selection UI. R4 (Availability Configuration) or a future settings section could add checkboxes for which calendars to check for conflicts.
+- **Client timezone plumbing exists** — F02 updated `POST /api/public/book` to accept timezone from the client. R2 (Timezone Configuration) should store the host's timezone on their user profile, and the availability calculation in `server/calendar-service.ts` should use it instead of the hardcoded 9am-5pm in server time.
+
 ---
 
 ## Current State
@@ -29,7 +35,7 @@
 The settings page (`client/src/pages/settings.tsx`) is minimal:
 
 - **Profile section:** Shows avatar, name, email (read-only), logout button
-- **Calendar section:** Shows connection status with connect/disconnect buttons
+- **Calendar section:** Shows real connection status with Google OAuth connect flow, calendar list display, and disconnect button (implemented in F02)
 - **Booking links section:** Shows booking URL and embed code with copy buttons
 - **No editing** — profile info cannot be changed
 - **No availability rules** — not configured here
