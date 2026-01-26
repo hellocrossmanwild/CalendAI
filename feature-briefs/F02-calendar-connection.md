@@ -2,7 +2,16 @@
 
 **Priority:** Critical
 **Estimated Scope:** Large
-**Dependencies:** F01 (user must be authenticated)
+**Dependencies:** F01 (user must be authenticated) — **SATISFIED**
+
+---
+
+## Impact from F01 Implementation
+
+- **F01 dependency is satisfied** — user authentication is fully implemented with email-based login, Google OAuth, magic links, and session management.
+- **Google OAuth infrastructure exists** — F01 implemented Google OAuth for user login (`GET /api/auth/google` + callback). The same `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` env vars can be shared for Calendar OAuth. However, Calendar OAuth needs **separate scopes** (`calendar.readonly`, `calendar.events`) and a **separate redirect URI**, so a distinct OAuth flow is needed.
+- **`updateUser()` method available** — added in F01, can be used to store calendar-related user preferences.
+- **Token management patterns** — F01 established token generation (`crypto.randomBytes`) and database storage patterns that can inform calendar token refresh logic.
 
 ---
 

@@ -6,6 +6,13 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **No direct dependency on F01**. Lead enrichment and scoring work on booking data, not user authentication.
+- **Email-based registration** — since users now register with email (not username), the host's email domain is reliably available for enrichment context if needed.
+
+---
+
 ## Current State
 
 Lead enrichment exists as an AI-inference feature:

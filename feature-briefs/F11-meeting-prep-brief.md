@@ -6,6 +6,13 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **No direct dependency on F01**. Meeting briefs are generated from booking and enrichment data.
+- **Email delivery dependency** — brief email delivery (R2) depends on F09. F01 has established the email stub pattern that F09 will replace with real delivery.
+
+---
+
 ## Current State
 
 Meeting prep briefs have a working foundation:

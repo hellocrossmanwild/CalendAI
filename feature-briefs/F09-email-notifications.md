@@ -6,9 +6,43 @@
 
 ---
 
+## Impact from F01 Implementation
+
+**F01 is now the most important consumer of F09.** Three F01 features are currently stubbed to `console.log`, waiting for real email delivery:
+
+1. **Magic link authentication** (`POST /api/auth/magic-link`) — sends login link email
+2. **Password reset** (`POST /api/auth/forgot-password`) — sends reset link email
+3. **Email verification** (on registration + `POST /api/auth/resend-verification`) — sends verification email
+
+### What F09 needs to wire up for F01:
+
+The stub function is in `server/routes.ts`:
+```typescript
+function sendEmail(to: string, subject: string, body: string): void {
+  console.log(`\n========== EMAIL (stub) ==========`);
+  // ... logs to console
+}
+```
+
+**F09 should:**
+1. Create `server/email-service.ts` with a real `sendEmail()` function
+2. Replace the stub in `server/routes.ts` with an import from the email service
+3. The existing call sites already pass `to`, `subject`, and `body` — they just need real delivery
+
+### Token infrastructure is ready:
+
+F01 established a token-based verification pattern (generate token → store in DB → send link → verify token → mark used). This exact pattern can be reused for F09's booking tokens (R3: reschedule/cancel tokens in confirmation emails).
+
+### Patterns to reuse from F01:
+- `generateToken()` — `crypto.randomBytes(32).toString("hex")` in `server/routes.ts`
+- Token table schema — `password_reset_tokens`, `magic_link_tokens`, `email_verification_tokens` in `shared/models/auth.ts`
+- Expiry + used flag verification pattern
+
+---
+
 ## Current State
 
-There is **zero email infrastructure** in the codebase:
+There is **zero email infrastructure** in the codebase (F01 auth emails are stubbed to console):
 
 - No email service configured (no SendGrid, Postmark, SES, Nodemailer, etc.)
 - No email templates

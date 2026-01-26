@@ -6,6 +6,13 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **No direct dependency on F01**, but users are now authenticated via email which means the AI conversation (R1) can reference the host's email domain for website scanning suggestions.
+- **User model expanded** — `emailVerified` field added. When F13 adds `companyName` and `websiteUrl` to the user model, AI event type creation can pre-populate these.
+
+---
+
 ## Current State
 
 Event type creation is a traditional CRUD form:

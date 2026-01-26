@@ -6,6 +6,15 @@
 
 ---
 
+## Impact from F01 Implementation
+
+- **User authentication is in place** — users can register, login, and maintain sessions. The onboarding wizard (R3) can rely on authenticated user context.
+- **`emailVerified` field available** — could optionally gate onboarding behind email verification.
+- **`updateUser()` storage method available** — can be used to store timezone and other user preferences set during onboarding.
+- **User model now has `emailVerified` field** — schema at `shared/models/auth.ts` has been expanded; further additions (timezone, companyName) will follow in F13.
+
+---
+
 ## Current State
 
 This feature does not exist at all. There is:
