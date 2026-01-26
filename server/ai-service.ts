@@ -333,3 +333,120 @@ Respond in JSON format:
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// AI-Assisted Event Type Creation (F04)
+// ---------------------------------------------------------------------------
+
+export interface EventTypeCreationResponse {
+  response: string;
+  complete: boolean;
+  action?: {
+    type: "scan_website";
+    url: string;
+  };
+  eventType?: {
+    name: string;
+    slug: string;
+    description: string;
+    duration: number;
+    location?: string;
+    questions?: string[];
+  };
+}
+
+function generateSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export async function processEventTypeCreation(
+  messages: { role: string; content: string }[],
+  calendarConnected?: boolean
+): Promise<EventTypeCreationResponse> {
+  const calendarNote = calendarConnected
+    ? " The user has Google Calendar connected, so Google Meet is available for auto-generated meeting links."
+    : "";
+
+  const systemPrompt = `You are an AI assistant helping a user create a bookable event type for their scheduling page.
+
+Guide them step by step. Ask about:
+1) What kind of meeting (discovery call, consultation, etc.)
+2) How long it should be (suggest 30 min as default)
+3) Their website URL (for branding extraction)
+4) Where meetings happen (Google Meet, Zoom, Phone, In-person, Custom URL)
+
+Ask ONE question at a time. Be conversational and concise (1-2 sentences per response).
+
+When you detect a website URL in the user's message, include an action to scan it.${calendarNote}
+
+When you have enough info to create the event type (at minimum: name/type and duration), signal completion.
+
+Always respond in JSON format with this structure:
+{
+  "response": "Your next message to the user",
+  "complete": false,
+  "action": null,
+  "eventType": null
+}
+
+When you detect a URL in the user's message:
+{
+  "response": "Let me scan your website for branding...",
+  "complete": false,
+  "action": { "type": "scan_website", "url": "https://example.com" }
+}
+
+When you have enough information to create the event type:
+{
+  "response": "Here's your event type! ...",
+  "complete": true,
+  "eventType": {
+    "name": "Discovery Call",
+    "slug": "discovery-call",
+    "description": "A 30-minute call to explore...",
+    "duration": 30,
+    "location": "google-meet",
+    "questions": ["What are you looking to discuss?", "What's your timeline?"]
+  }
+}`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...messages.map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        })),
+      ],
+      response_format: { type: "json_object" },
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      return {
+        response: "I had trouble processing that. Could you try again?",
+        complete: false,
+      };
+    }
+
+    const parsed = JSON.parse(content) as EventTypeCreationResponse;
+
+    // Ensure slug is properly generated from the name
+    if (parsed.eventType?.name) {
+      parsed.eventType.slug = generateSlug(parsed.eventType.name);
+    }
+
+    return parsed;
+  } catch (error) {
+    console.error("Event type creation error:", error);
+    return {
+      response: "I had trouble processing that. Could you try again?",
+      complete: false,
+    };
+  }
+}

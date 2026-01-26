@@ -19,6 +19,12 @@
 - **Google Calendar events created on booking** — F02 creates a Google Calendar event with Google Meet link when a booking is confirmed. The confirmation screen (R5) can now accurately reference the calendar invite.
 - **Double-booking prevented** — F02 added write-time conflict checking (HTTP 409), so the booking page should handle this error gracefully in R5.
 
+### Impact from F04 Implementation
+
+- **Branding fields now exist on `event_types`** — F04 added `logo`, `primaryColor`, `secondaryColor` columns. R2 (Apply Branding to Booking Page) has a minimal foundation already applied: logo replaces the calendar icon, `primaryColor` is applied to buttons and the duration badge. F05's R2 can build on this with full color scheme, background tints, and secondary color usage.
+- **Location field available** — F04 added `location` to event types. The booking page can now display meeting location info (Google Meet, Zoom, phone, etc.) in the confirmation step or header.
+- **Custom questions UI implemented** — The event type form now has a questions editor (F04 R3), so F07's pre-qual chat will receive properly configured questions.
+
 ---
 
 ## Current State

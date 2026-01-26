@@ -19,6 +19,10 @@ export const eventTypes = pgTable("event_types", {
   color: text("color").default("#6366f1"),
   isActive: boolean("is_active").default(true),
   questions: jsonb("questions").$type<string[]>().default([]),
+  location: text("location"),                    // e.g. "google-meet", "zoom:https://...", "phone:+44...", "in-person:123 Main St", "custom:https://..."
+  logo: text("logo"),                            // URL to logo image
+  primaryColor: text("primary_color"),           // hex color e.g. "#6366f1"
+  secondaryColor: text("secondary_color"),       // hex color
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });

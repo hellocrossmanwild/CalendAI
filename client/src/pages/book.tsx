@@ -253,16 +253,20 @@ export default function BookPage() {
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-8 text-center">
           <div
-            className="inline-flex h-14 w-14 items-center justify-center rounded-lg mb-4"
-            style={{ backgroundColor: `${eventType.color}20`, color: eventType.color }}
+            className="inline-flex h-14 w-14 items-center justify-center rounded-lg mb-4 overflow-hidden"
+            style={{ backgroundColor: `${eventType.primaryColor || eventType.color}20`, color: eventType.primaryColor || eventType.color || undefined }}
           >
-            <Calendar className="h-7 w-7" />
+            {eventType.logo ? (
+              <img src={eventType.logo} alt={eventType.name} className="h-12 w-12 object-contain" />
+            ) : (
+              <Calendar className="h-7 w-7" />
+            )}
           </div>
           <h1 className="text-2xl font-semibold mb-2">{eventType.name}</h1>
           {eventType.description && (
             <p className="text-muted-foreground max-w-md mx-auto">{eventType.description}</p>
           )}
-          <Badge variant="secondary" className="mt-3">
+          <Badge variant="secondary" className="mt-3" style={eventType.primaryColor ? { backgroundColor: `${eventType.primaryColor}15`, color: eventType.primaryColor, borderColor: `${eventType.primaryColor}30` } : undefined}>
             <Clock className="h-3.5 w-3.5 mr-1" />
             {eventType.duration} minutes
           </Badge>
@@ -370,6 +374,7 @@ export default function BookPage() {
                         key={slot.time}
                         variant={selectedTime === slot.time ? "default" : "outline"}
                         onClick={() => handleTimeSelect(slot.time)}
+                        style={selectedTime === slot.time && eventType.primaryColor ? { backgroundColor: eventType.primaryColor, borderColor: eventType.primaryColor } : undefined}
                         data-testid={`button-time-${slot.time.replace(":", "")}`}
                       >
                         {slot.time}

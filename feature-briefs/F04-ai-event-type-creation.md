@@ -159,15 +159,15 @@ secondaryColor: text("secondary_color"), // hex color
 
 ## Acceptance Criteria
 
-- [ ] User can create an event type through conversational AI chat
-- [ ] AI asks about meeting type, duration, website, and suggests description
-- [ ] Website scanning extracts business name, description, and brand colors
-- [ ] Extracted branding is applied to the event type
-- [ ] Custom pre-qualification questions can be added/edited/removed in the event type form
-- [ ] Location/meeting type can be configured per event type
-- [ ] Traditional form still works with all new fields available
-- [ ] Public booking page reflects event type branding (colors, logo)
-- [ ] User can choose between "Create with AI" and "Create Manually"
+- [x] User can create an event type through conversational AI chat
+- [x] AI asks about meeting type, duration, website, and suggests description
+- [x] Website scanning extracts business name, description, and brand colors
+- [x] Extracted branding is applied to the event type
+- [x] Custom pre-qualification questions can be added/edited/removed in the event type form
+- [x] Location/meeting type can be configured per event type
+- [x] Traditional form still works with all new fields available
+- [x] Public booking page reflects event type branding (colors, logo)
+- [x] User can choose between "Create with AI" and "Create Manually"
 
 ---
 
@@ -176,3 +176,49 @@ secondaryColor: text("secondary_color"), // hex color
 - Website scanning requires server-side HTTP fetch. Be mindful of timeouts and error handling for unreachable sites.
 - The AI conversation should be flexible — if the user provides multiple pieces of info in one message, the AI should handle it gracefully.
 - Consider rate limiting the website scanning endpoint.
+
+---
+
+## Implementation Status (Completed)
+
+**Implemented in branch:** `claude/review-codebase-f4-ppTDM`
+
+### Files Created
+| File | Purpose |
+|------|---------|
+| `client/src/pages/event-type-ai-create.tsx` | Conversational AI event creation page with chat UI |
+| `server/website-scanner.ts` | Website fetch + HTML extraction + GPT-4o branding analysis |
+| `vitest.config.ts` | Test framework configuration |
+| `server/__tests__/website-scanner.test.ts` | 7 tests for website scanning |
+| `server/__tests__/ai-service.test.ts` | 7 tests for AI event type creation |
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `shared/schema.ts` | Added `location`, `logo`, `primaryColor`, `secondaryColor` columns to `event_types` |
+| `server/ai-service.ts` | Added `processEventTypeCreation()` function + `EventTypeCreationResponse` type |
+| `server/routes.ts` | Added `POST /api/ai/create-event-type` and `POST /api/ai/scan-website` endpoints |
+| `client/src/pages/event-type-form.tsx` | Added questions editor, location selector, branding fields |
+| `client/src/pages/event-types.tsx` | Added dual "Create with AI" / "Create Manually" buttons, logo + location badges |
+| `client/src/App.tsx` | Added route `/event-types/new/ai` |
+| `client/src/pages/book.tsx` | Minimal branding: logo display, primaryColor on accents |
+| `package.json` | Added `test` and `test:watch` scripts |
+
+### Acceptance Criteria
+- [x] User can create an event type through conversational AI chat
+- [x] AI asks about meeting type, duration, website, and suggests description
+- [x] Website scanning extracts business name, description, and brand colors
+- [x] Extracted branding is applied to the event type
+- [x] Custom pre-qualification questions can be added/edited/removed in the event type form
+- [x] Location/meeting type can be configured per event type
+- [x] Traditional form still works with all new fields available
+- [x] Public booking page reflects event type branding (colors, logo)
+- [x] User can choose between "Create with AI" and "Create Manually"
+
+### Architecture Decisions
+- **Website scanner uses plain `fetch`** (no headless browser) — GPT-4o handles HTML analysis
+- **AI chat is stateless** — frontend sends full message history per request, matching existing pre-qual chat pattern
+- **Location stored as prefixed string** — e.g. `google-meet`, `zoom:https://...`, `phone:+44...`
+- **Branding on booking page is minimal** — logo + primaryColor on accents; full treatment deferred to F05
+- **Custom questions use up/down arrows** — no drag-and-drop library, keeping dependencies minimal
+- **14 backend tests** via Vitest with mocked OpenAI

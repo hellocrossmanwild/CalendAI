@@ -1,10 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useLocation, useRoute, Link } from "wouter";
-import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Loader2, Sparkles, Plus, Trash2, ChevronUp, ChevronDown, MapPin, Globe, Phone, Video, Building } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,11 @@ const formSchema = z.object({
   bufferAfter: z.number().min(0).max(120).default(0),
   color: z.string().default("#6366f1"),
   isActive: z.boolean().default(true),
+  questions: z.array(z.string()).default([]),
+  location: z.string().optional(),
+  logo: z.string().optional(),
+  primaryColor: z.string().optional(),
+  secondaryColor: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -88,6 +93,11 @@ export default function EventTypeFormPage() {
       bufferAfter: 0,
       color: "#6366f1",
       isActive: true,
+      questions: [],
+      location: "",
+      logo: "",
+      primaryColor: "",
+      secondaryColor: "",
     },
   });
 
@@ -102,6 +112,11 @@ export default function EventTypeFormPage() {
         bufferAfter: eventType.bufferAfter || 0,
         color: eventType.color || "#6366f1",
         isActive: eventType.isActive ?? true,
+        questions: (eventType.questions as string[]) || [],
+        location: eventType.location || "",
+        logo: eventType.logo || "",
+        primaryColor: eventType.primaryColor || "",
+        secondaryColor: eventType.secondaryColor || "",
       });
     }
   }, [eventType, form]);
@@ -345,6 +360,210 @@ export default function EventTypeFormPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Pre-Qualification Questions</CardTitle>
+              <CardDescription>Questions to ask guests during the booking process</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(() => {
+                const questions = form.watch("questions");
+
+                const addQuestion = () => {
+                  form.setValue("questions", [...questions, ""]);
+                };
+
+                const removeQuestion = (index: number) => {
+                  form.setValue("questions", questions.filter((_: string, i: number) => i !== index));
+                };
+
+                const moveQuestion = (index: number, direction: "up" | "down") => {
+                  const newQuestions = [...questions];
+                  const swapIndex = direction === "up" ? index - 1 : index + 1;
+                  [newQuestions[index], newQuestions[swapIndex]] = [newQuestions[swapIndex], newQuestions[index]];
+                  form.setValue("questions", newQuestions);
+                };
+
+                const updateQuestion = (index: number, value: string) => {
+                  const newQuestions = [...questions];
+                  newQuestions[index] = value;
+                  form.setValue("questions", newQuestions);
+                };
+
+                return (
+                  <>
+                    {questions.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No questions added yet. Questions will be asked to guests during the booking pre-qualification chat.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {questions.map((question: string, index: number) => (
+                          <div key={index} className="flex items-center gap-2">
+                            <Input
+                              value={question}
+                              onChange={(e) => updateQuestion(index, e.target.value)}
+                              placeholder={`Question ${index + 1}`}
+                              data-testid={`input-question-${index}`}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              disabled={index === 0}
+                              onClick={() => moveQuestion(index, "up")}
+                              data-testid={`button-question-up-${index}`}
+                            >
+                              <ChevronUp className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              disabled={index === questions.length - 1}
+                              onClick={() => moveQuestion(index, "down")}
+                              data-testid={`button-question-down-${index}`}
+                            >
+                              <ChevronDown className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => removeQuestion(index)}
+                              data-testid={`button-question-delete-${index}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={addQuestion}
+                      data-testid="button-add-question"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Add Question
+                    </Button>
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Meeting Location</CardTitle>
+              <CardDescription>Where will this meeting take place?</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(() => {
+                const locationValue = form.watch("location") || "";
+                const locationType = locationValue.includes(":") ? locationValue.split(":")[0] : locationValue;
+                const locationDetail = locationValue.includes(":") ? locationValue.substring(locationValue.indexOf(":") + 1) : "";
+
+                const handleTypeChange = (type: string) => {
+                  if (type === "" || type === "google-meet") {
+                    form.setValue("location", type);
+                  } else {
+                    form.setValue("location", `${type}:`);
+                  }
+                };
+
+                const handleDetailChange = (detail: string) => {
+                  form.setValue("location", `${locationType}:${detail}`);
+                };
+
+                return (
+                  <>
+                    <Select
+                      value={locationType}
+                      onValueChange={handleTypeChange}
+                    >
+                      <SelectTrigger data-testid="select-location">
+                        <SelectValue placeholder="Not specified" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">Not specified</SelectItem>
+                        <SelectItem value="google-meet">
+                          <div className="flex items-center gap-2">
+                            <Video className="h-4 w-4" />
+                            Google Meet (auto-generated)
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="zoom">
+                          <div className="flex items-center gap-2">
+                            <Video className="h-4 w-4" />
+                            Zoom
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="phone">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4" />
+                            Phone Call
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="in-person">
+                          <div className="flex items-center gap-2">
+                            <Building className="h-4 w-4" />
+                            In Person
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="custom">
+                          <div className="flex items-center gap-2">
+                            <Globe className="h-4 w-4" />
+                            Custom URL
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    {locationType === "google-meet" && (
+                      <p className="text-sm text-muted-foreground">
+                        A Google Meet link will be auto-generated when a booking is confirmed
+                      </p>
+                    )}
+                    {locationType === "zoom" && (
+                      <Input
+                        value={locationDetail}
+                        onChange={(e) => handleDetailChange(e.target.value)}
+                        placeholder="Paste your Zoom link"
+                        data-testid="input-location-detail"
+                      />
+                    )}
+                    {locationType === "phone" && (
+                      <Input
+                        value={locationDetail}
+                        onChange={(e) => handleDetailChange(e.target.value)}
+                        placeholder="Your phone number"
+                        data-testid="input-location-detail"
+                      />
+                    )}
+                    {locationType === "in-person" && (
+                      <Input
+                        value={locationDetail}
+                        onChange={(e) => handleDetailChange(e.target.value)}
+                        placeholder="Meeting address"
+                        data-testid="input-location-detail"
+                      />
+                    )}
+                    {locationType === "custom" && (
+                      <Input
+                        value={locationDetail}
+                        onChange={(e) => handleDetailChange(e.target.value)}
+                        placeholder="Meeting URL"
+                        data-testid="input-location-detail"
+                      />
+                    )}
+                  </>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Appearance</CardTitle>
               <CardDescription>Customize how your event type looks</CardDescription>
             </CardHeader>
@@ -371,6 +590,84 @@ export default function EventTypeFormPage() {
                           data-testid={`button-color-${color.label.toLowerCase()}`}
                         />
                       ))}
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="logo"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Logo URL</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="https://example.com/logo.png"
+                        {...field}
+                        data-testid="input-logo"
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      URL to your logo image for the booking page
+                    </FormDescription>
+                    {field.value && (
+                      <img
+                        src={field.value}
+                        className="h-10 w-10 rounded object-contain border mt-2"
+                        alt="Logo preview"
+                      />
+                    )}
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="primaryColor"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Primary Brand Color</FormLabel>
+                    <div className="flex items-center gap-2">
+                      <FormControl>
+                        <Input
+                          type="text"
+                          placeholder="#6366f1"
+                          {...field}
+                          data-testid="input-primary-color"
+                        />
+                      </FormControl>
+                      <div
+                        className="h-8 w-8 rounded border flex-shrink-0"
+                        style={{ backgroundColor: field.value || "#6366f1" }}
+                      />
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="secondaryColor"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Secondary Brand Color</FormLabel>
+                    <div className="flex items-center gap-2">
+                      <FormControl>
+                        <Input
+                          type="text"
+                          placeholder="#6366f1"
+                          {...field}
+                          data-testid="input-secondary-color"
+                        />
+                      </FormControl>
+                      <div
+                        className="h-8 w-8 rounded border flex-shrink-0"
+                        style={{ backgroundColor: field.value || "#6366f1" }}
+                      />
                     </div>
                     <FormMessage />
                   </FormItem>
