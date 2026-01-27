@@ -113,7 +113,8 @@ export async function generateMeetingBrief(
   eventTypeDescription: string | null,
   enrichment: LeadEnrichmentData | null,
   notes: string | null,
-  chatHistory: { role: string; content: string }[] | null
+  chatHistory: { role: string; content: string }[] | null,
+  documents?: { name: string; contentType: string; size: number }[]
 ): Promise<MeetingBriefData> {
   const enrichmentContext = enrichment
     ? `
@@ -127,6 +128,10 @@ Pre-qualification conversation:
 ${chatHistory.map((m) => `${m.role}: ${m.content}`).join("\n")}`
     : "";
 
+  const documentContext = documents?.length
+    ? `\nUploaded Documents:\n${documents.map(d => `- ${d.name} (${d.contentType}, ${Math.round(d.size / 1024)}KB)`).join("\n")}\nPlease include a brief note about these documents in your response.`
+    : "";
+
   const prompt = `You are a meeting preparation assistant. Generate a comprehensive meeting brief based on the following information.
 
 Guest: ${guestName}
@@ -137,17 +142,20 @@ ${eventTypeDescription ? `Meeting Description: ${eventTypeDescription}` : ""}
 ${notes ? `Additional Notes: ${notes}` : ""}
 ${enrichmentContext}
 ${chatContext}
+${documentContext}
 
 Generate a meeting brief with:
 1. A concise summary of who this person is and what they likely want to discuss
 2. 3-5 specific talking points to address in the meeting
 3. Key context points to keep in mind
+4. If documents are attached, a brief analysis noting the document names and likely relevance
 
 Respond in JSON format:
 {
   "summary": "A 2-3 sentence summary of the meeting context",
   "talkingPoints": ["Talking point 1", "Talking point 2", ...],
-  "keyContext": ["Context item 1", "Context item 2", ...]
+  "keyContext": ["Context item 1", "Context item 2", ...],
+  "documentAnalysis": "Brief analysis of uploaded documents and their relevance, or null if no documents"
 }`;
 
   try {

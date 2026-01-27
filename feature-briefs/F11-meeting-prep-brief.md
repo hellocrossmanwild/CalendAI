@@ -187,3 +187,51 @@ Subject: Meeting Prep: {Guest Name} - {Event Type} at {Time}
 - **Enhanced enrichment data provides richer brief context.** F08's `enrichLead()` function now accepts an optional `prequalContext` containing the summary, key points, timeline, and company name from F07's AI summary card. This means the enrichment data passed to `generateMeetingBrief()` is richer than before -- the AI has more context about the guest's needs, timeline, and company, resulting in more relevant and actionable meeting briefs.
 - **Brief emails (R2) can include the lead score for quick host context.** When F09 email delivery is implemented and F11's R2 (Email Delivery of Briefs) is built, the brief email template can include the lead score label and numeric score at the top of the email (e.g., "Lead Score: High (75)"). This gives the host an immediate sense of lead quality before reading the full brief.
 - **F08 dependency is now SATISFIED.** F11 listed F08 as a dependency for enrichment data in briefs. With F08 complete, the enrichment pipeline includes scoring, enhanced AI inference with pre-qual context, and auto-enrichment on booking creation -- all of which feed into richer meeting prep briefs.
+
+---
+
+## Implementation Status (Complete)
+
+All requirements implemented:
+
+- [x] R1: Automatic brief generation ~1 hour before scheduled meetings via `server/brief-scheduler.ts`
+- [x] R2: Email delivery of briefs via `meetingPrepBriefEmail()` template in `server/email-templates.ts`
+- [x] R3: "Regenerate Brief" button on booking detail page with `force=true` API support
+- [x] R4: Document analysis — document metadata included in AI prompt, `documentAnalysis` field populated
+- [x] R5: Similar bookings context via `getBookingsByGuestDomain()` storage method
+- [x] R6: In-app notifications — read/unread tracking with `readAt` field, unread badge in sidebar
+
+### Files Created
+| File | Purpose |
+|------|---------|
+| `server/brief-scheduler.ts` | 15-minute interval scheduler for automatic brief generation |
+| `server/__tests__/f11-meeting-prep-brief.test.ts` | 108 test cases covering all F11 requirements |
+
+### Files Modified
+| File | Changes |
+|------|---------|
+| `server/index.ts` | Starts brief scheduler on boot |
+| `server/routes.ts` | `force=true` param on generate-brief, brief read tracking endpoints, unread count endpoint |
+| `server/ai-service.ts` | Documents parameter added to `generateMeetingBrief()` |
+| `server/storage.ts` | 5 new methods: `getUpcomingBookingsWithoutBriefs`, `getBookingsByGuestDomain`, `deleteMeetingBrief`, `markBriefAsRead`, `getUnreadBriefsCount` |
+| `server/email-templates.ts` | `meetingPrepBriefEmail()` template with full PRD format |
+| `shared/schema.ts` | `readAt` timestamp added to `meeting_briefs` table |
+| `client/src/pages/booking-detail.tsx` | Regenerate button, document analysis display, auto-mark-as-read, guest timezone |
+| `client/src/pages/briefs.tsx` | Regenerate action, read/unread visual indicators |
+| `client/src/components/AppSidebar.tsx` | Unread briefs count badge |
+
+### Acceptance Criteria
+- [x] Briefs are automatically generated ~1 hour before scheduled meetings
+- [x] Auto-generated briefs are emailed to host (if email is configured via F09 and preference enabled)
+- [x] "Regenerate Brief" button works and replaces existing brief with fresh one
+- [x] Brief includes document analysis when documents are uploaded
+- [x] Brief email follows the PRD template format
+- [x] Brief scheduler runs reliably without blocking server startup
+- [x] Manual "Generate Brief" button continues to work for on-demand generation
+- [x] If enrichment data exists, it's included in the brief
+
+### Security Notes
+- Scheduler has race condition guard (`cycleRunning` flag) to prevent duplicate generation
+- All endpoints require authentication and verify booking ownership
+- Document analysis uses metadata only (no file content access)
+- Email template escapes all user-provided strings via `escapeHtml()`

@@ -466,3 +466,198 @@ If you didn't request this, you can safely ignore this email.`;
 
   return { subject: cfg.subject, html, text };
 }
+
+// ---------------------------------------------------------------------------
+// 6. Meeting Prep Brief (to host)
+// ---------------------------------------------------------------------------
+
+export interface MeetingPrepBriefData {
+  guestName: string;
+  guestEmail: string;
+  hostName: string;
+  eventTypeName: string;
+  startTime: Date;
+  endTime: Date;
+  duration: number;
+  guestTimezone: string;
+  hostTimezone: string;
+  summary: string;
+  talkingPoints: string[];
+  keyContext: string[];
+  documentAnalysis?: string | null;
+  enrichment?: {
+    companyInfo?: {
+      name?: string;
+      industry?: string;
+      size?: string;
+      description?: string;
+    } | null;
+    personalInfo?: {
+      role?: string;
+      linkedInUrl?: string;
+    } | null;
+    leadScore?: number | null;
+    leadScoreLabel?: string | null;
+    leadScoreReasoning?: string | null;
+  } | null;
+  baseUrl: string;
+  bookingId: number;
+}
+
+export function meetingPrepBriefEmail(data: MeetingPrepBriefData): EmailTemplate {
+  const gName = escapeHtml(data.guestName);
+  const eName = escapeHtml(data.eventTypeName);
+  const dateStr = formatDateTime(data.startTime, data.hostTimezone);
+  const dateOnly = formatDateOnly(data.startTime, data.hostTimezone);
+  const timeOnly = formatTimeOnly(data.startTime, data.hostTimezone);
+  const detailsUrl = `${data.baseUrl}/bookings/${data.bookingId}`;
+
+  // --- Who section ---
+  let whoLines = `
+        <p style="margin:0 0 4px;font-size:14px;color:#52525b;">Name: ${gName}</p>
+        <p style="margin:0 0 4px;font-size:14px;color:#52525b;">Email: ${escapeHtml(data.guestEmail)}</p>`;
+  let whoText = `Name: ${data.guestName}\nEmail: ${data.guestEmail}`;
+
+  if (data.enrichment?.personalInfo?.role) {
+    whoLines += `\n        <p style="margin:0 0 4px;font-size:14px;color:#52525b;">Role: ${escapeHtml(data.enrichment.personalInfo.role)}</p>`;
+    whoText += `\nRole: ${data.enrichment.personalInfo.role}`;
+  }
+  if (data.enrichment?.companyInfo?.name) {
+    whoLines += `\n        <p style="margin:0 0 4px;font-size:14px;color:#52525b;">Company: ${escapeHtml(data.enrichment.companyInfo.name)}</p>`;
+    whoText += `\nCompany: ${data.enrichment.companyInfo.name}`;
+  }
+  if (data.enrichment?.personalInfo?.linkedInUrl) {
+    const liUrl = escapeHtml(data.enrichment.personalInfo.linkedInUrl);
+    whoLines += `\n        <p style="margin:0;font-size:14px;color:#52525b;">LinkedIn: <a href="${liUrl}" style="color:#6366f1;text-decoration:underline;">${liUrl}</a></p>`;
+    whoText += `\nLinkedIn: ${data.enrichment.personalInfo.linkedInUrl}`;
+  }
+
+  // --- Company Context section (only if enrichment has company description) ---
+  let companySection = "";
+  let companyText = "";
+  if (data.enrichment?.companyInfo?.description) {
+    let companyMeta = "";
+    let companyMetaText = "";
+    if (data.enrichment.companyInfo.industry || data.enrichment.companyInfo.size) {
+      const parts: string[] = [];
+      if (data.enrichment.companyInfo.industry) parts.push(escapeHtml(data.enrichment.companyInfo.industry));
+      if (data.enrichment.companyInfo.size) parts.push(`${escapeHtml(data.enrichment.companyInfo.size)} employees`);
+      companyMeta = `<p style="margin:0 0 4px;font-size:13px;color:#71717a;">${parts.join(" · ")}</p>`;
+      companyMetaText = parts.map(p => p.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#039;/g, "'")).join(" · ") + "\n";
+    }
+    companySection = `
+      <p style="margin:24px 0 8px;font-size:13px;font-weight:600;color:#52525b;text-transform:uppercase;letter-spacing:0.05em;">Company Context</p>
+      ${companyMeta}
+      <p style="margin:0;font-size:14px;color:#3f3f46;">${escapeHtml(data.enrichment.companyInfo.description)}</p>`;
+    const industryText = data.enrichment.companyInfo.industry || "";
+    const sizeText = data.enrichment.companyInfo.size ? `${data.enrichment.companyInfo.size} employees` : "";
+    const metaParts = [industryText, sizeText].filter(Boolean);
+    companyMetaText = metaParts.length > 0 ? metaParts.join(" · ") + "\n" : "";
+    companyText = `\nCompany Context:\n${companyMetaText}${data.enrichment.companyInfo.description}`;
+  }
+
+  // --- Lead Score section (only if available) ---
+  let scoreSection = "";
+  let scoreText = "";
+  if (data.enrichment?.leadScoreLabel && data.enrichment?.leadScore != null) {
+    const colors: Record<string, string> = { High: "#22c55e", Medium: "#eab308", Low: "#ef4444" };
+    const color = colors[data.enrichment.leadScoreLabel] || "#71717a";
+    scoreSection = `
+      <p style="margin:24px 0 8px;font-size:13px;font-weight:600;color:#52525b;text-transform:uppercase;letter-spacing:0.05em;">Lead Score</p>
+      <p style="margin:0;font-size:14px;color:#52525b;">
+        <span style="display:inline-block;padding:2px 8px;border-radius:9999px;background-color:${color}20;color:${color};font-weight:600;font-size:13px;">${escapeHtml(data.enrichment.leadScoreLabel)} (${data.enrichment.leadScore})</span>
+      </p>`;
+    scoreText = `\nLead Score: ${data.enrichment.leadScoreLabel} (${data.enrichment.leadScore})`;
+    if (data.enrichment.leadScoreReasoning) {
+      scoreSection += `\n      <p style="margin:4px 0 0;font-size:13px;color:#71717a;">${escapeHtml(data.enrichment.leadScoreReasoning)}</p>`;
+      scoreText += `\n${data.enrichment.leadScoreReasoning}`;
+    }
+  }
+
+  // --- Summary section ---
+  const summarySection = `
+      <p style="margin:24px 0 8px;font-size:13px;font-weight:600;color:#52525b;text-transform:uppercase;letter-spacing:0.05em;">Summary</p>
+      <p style="margin:0;font-size:14px;color:#3f3f46;">${escapeHtml(data.summary)}</p>`;
+  const summaryTextBlock = `\nSummary:\n${data.summary}`;
+
+  // --- Talking Points section ---
+  let talkingPointsSection = "";
+  let talkingPointsText = "";
+  if (data.talkingPoints.length > 0) {
+    const listItems = data.talkingPoints
+      .map((tp, i) => `<tr><td style="padding:0 8px 4px 0;font-size:14px;color:#6366f1;vertical-align:top;font-weight:600;">${i + 1}.</td><td style="padding:0 0 4px;font-size:14px;color:#3f3f46;">${escapeHtml(tp)}</td></tr>`)
+      .join("\n          ");
+    talkingPointsSection = `
+      <p style="margin:24px 0 8px;font-size:13px;font-weight:600;color:#52525b;text-transform:uppercase;letter-spacing:0.05em;">Suggested Talking Points</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0;">
+          ${listItems}
+      </table>`;
+    talkingPointsText = `\nSuggested Talking Points:\n${data.talkingPoints.map((tp, i) => `${i + 1}. ${tp}`).join("\n")}`;
+  }
+
+  // --- Key Context section ---
+  let keyContextSection = "";
+  let keyContextText = "";
+  if (data.keyContext.length > 0) {
+    const contextItems = data.keyContext
+      .map((kc) => `<tr><td style="padding:0 8px 4px 0;font-size:14px;color:#6366f1;vertical-align:top;">&#x2022;</td><td style="padding:0 0 4px;font-size:14px;color:#3f3f46;">${escapeHtml(kc)}</td></tr>`)
+      .join("\n          ");
+    keyContextSection = `
+      <p style="margin:24px 0 8px;font-size:13px;font-weight:600;color:#52525b;text-transform:uppercase;letter-spacing:0.05em;">Key Context</p>
+      <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0;">
+          ${contextItems}
+      </table>`;
+    keyContextText = `\nKey Context:\n${data.keyContext.map((kc) => `- ${kc}`).join("\n")}`;
+  }
+
+  // --- Document Summary section (only if available) ---
+  let docSection = "";
+  let docText = "";
+  if (data.documentAnalysis) {
+    docSection = `
+      <p style="margin:24px 0 8px;font-size:13px;font-weight:600;color:#52525b;text-transform:uppercase;letter-spacing:0.05em;">Document Summary</p>
+      <p style="margin:0;font-size:14px;color:#3f3f46;">${escapeHtml(data.documentAnalysis)}</p>`;
+    docText = `\nDocument Summary:\n${data.documentAnalysis}`;
+  }
+
+  const subject = `Meeting Prep: ${data.guestName} - ${data.eventTypeName} at ${timeOnly}`;
+
+  const html = wrapHtml(`
+    <h1 style="margin:0 0 4px;font-size:20px;font-weight:600;color:#18181b;">Meeting Prep: ${gName}</h1>
+    <p style="margin:0 0 24px;font-size:15px;color:#52525b;">${dateOnly} &mdash; ${eName}</p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fafafa;border:1px solid #e4e4e7;border-radius:6px;margin-bottom:4px;">
+      <tr><td style="padding:16px;">
+        <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#52525b;text-transform:uppercase;letter-spacing:0.05em;">Who</p>
+        ${whoLines}
+      </td></tr>
+    </table>
+
+    ${companySection}
+    ${scoreSection}
+    ${summarySection}
+    ${talkingPointsSection}
+    ${keyContextSection}
+    ${docSection}
+
+    <p style="margin:24px 0 0;">
+      <a href="${escapeHtml(detailsUrl)}" style="display:inline-block;padding:10px 20px;background-color:#6366f1;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:500;">View Full Details in CalendAI</a>
+    </p>
+  `, `Meeting prep brief for ${data.guestName} — ${data.eventTypeName}`);
+
+  const text = `Meeting Prep: ${data.guestName}
+${dateStr} — ${data.eventTypeName}
+
+Who:
+${whoText}
+${companyText}
+${scoreText}
+${summaryTextBlock}
+${talkingPointsText}
+${keyContextText}
+${docText}
+
+View full details: ${detailsUrl}`;
+
+  return { subject, html, text };
+}

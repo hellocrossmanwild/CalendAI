@@ -6,6 +6,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { storage } from "./storage";
 import { pool } from "./db";
+import { startBriefScheduler } from "./brief-scheduler";
 
 const app = express();
 const httpServer = createServer(app);
@@ -112,6 +113,9 @@ app.use((req, res, next) => {
 
 (async () => {
   await registerRoutes(httpServer, app);
+
+  // Start the automatic brief generation scheduler (non-blocking)
+  startBriefScheduler();
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

@@ -711,9 +711,19 @@ export async function registerRoutes(
       }
 
       const existing = await storage.getMeetingBrief(booking.id);
-      if (existing) {
+      const force = req.query.force === "true";
+
+      if (existing && !force) {
         return res.json(existing);
       }
+
+      // If regenerating, delete the old brief
+      if (existing && force) {
+        await storage.deleteMeetingBrief(booking.id);
+      }
+
+      // Get documents for this booking
+      const docs = await storage.getDocuments(booking.id);
 
       const briefData = await generateMeetingBrief(
         booking.guestName,
@@ -723,7 +733,8 @@ export async function registerRoutes(
         booking.eventType?.description || null,
         booking.enrichment || null,
         booking.notes,
-        booking.prequalResponse?.chatHistory || null
+        booking.prequalResponse?.chatHistory || null,
+        docs.map(d => ({ name: d.name, contentType: d.contentType || "unknown", size: d.size || 0 }))
       );
 
       const brief = await storage.createMeetingBrief({
@@ -731,13 +742,83 @@ export async function registerRoutes(
         summary: briefData.summary,
         talkingPoints: briefData.talkingPoints,
         keyContext: briefData.keyContext,
-        documentAnalysis: briefData.documentAnalysis,
+        documentAnalysis: briefData.documentAnalysis || null,
       });
+
+      // Fire-and-forget: send brief email if preferences allow
+      (async () => {
+        try {
+          const user = await storage.getUser(booking.userId);
+          if (!user || !user.email) return;
+          const prefs = await storage.getNotificationPreferences(booking.userId);
+          if (prefs && prefs.meetingBriefEmail === false) return;
+
+          // Send meeting prep brief email
+          const { meetingPrepBriefEmail } = await import("./email-templates");
+          if (typeof meetingPrepBriefEmail !== "function") return;
+
+          const rules = await storage.getAvailabilityRules(booking.userId);
+          const hostTimezone = rules?.timezone || "UTC";
+          const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
+
+          const template = meetingPrepBriefEmail({
+            guestName: booking.guestName,
+            guestEmail: booking.guestEmail,
+            hostName: [user.firstName, user.lastName].filter(Boolean).join(" ") || "Host",
+            eventTypeName: booking.eventType?.name || "Meeting",
+            startTime: new Date(booking.startTime),
+            endTime: new Date(booking.endTime),
+            duration: booking.eventType?.duration || 30,
+            guestTimezone: booking.guestTimezone || booking.timezone || "UTC",
+            hostTimezone,
+            summary: briefData.summary,
+            talkingPoints: briefData.talkingPoints,
+            keyContext: briefData.keyContext,
+            documentAnalysis: briefData.documentAnalysis || null,
+            enrichment: booking.enrichment || null,
+            baseUrl,
+            bookingId: booking.id,
+          });
+
+          const { sendEmail } = await import("./email-service");
+          await sendEmail({ to: user.email, subject: template.subject, html: template.html, text: template.text });
+        } catch (emailErr) {
+          console.error("Failed to send brief email:", emailErr);
+        }
+      })();
 
       res.json(brief);
     } catch (error) {
       console.error("Error generating brief:", error);
       res.status(500).json({ error: "Failed to generate meeting brief" });
+    }
+  });
+
+  // Brief read tracking
+  app.patch("/api/bookings/:id/brief/read", requireAuth, async (req, res) => {
+    try {
+      const booking = await storage.getBooking(parseInt(req.params.id));
+      if (!booking || booking.userId !== req.user!.id) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+      const brief = await storage.markBriefAsRead(booking.id);
+      if (!brief) {
+        return res.status(404).json({ error: "Brief not found" });
+      }
+      res.json(brief);
+    } catch (error) {
+      console.error("Error marking brief as read:", error);
+      res.status(500).json({ error: "Failed to mark brief as read" });
+    }
+  });
+
+  app.get("/api/briefs/unread-count", requireAuth, async (req, res) => {
+    try {
+      const count = await storage.getUnreadBriefsCount(req.user!.id);
+      res.json({ count });
+    } catch (error) {
+      console.error("Error getting unread briefs count:", error);
+      res.status(500).json({ error: "Failed to get unread count" });
     }
   });
 

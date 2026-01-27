@@ -251,3 +251,10 @@ PATCH  /api/branding               → Update branding settings
 - **`isValidTimezone()` helper is available for validating timezone input in settings.** F06 added an `isValidTimezone()` utility that validates IANA timezone strings. R2 (Timezone Configuration) should use this same validator when the host selects or changes their timezone, ensuring only valid IANA identifiers are stored.
 - **Server-side timezone conversion is now operational.** F06 completed the server-side timezone conversion that F05 and F13 R2 anticipated. The host timezone stored via F13's settings is now the authoritative source for working-hour interpretation in `calculateAvailability()`. This means R2's timezone selector has real, immediate impact on the booking experience — it is no longer a deferred or cosmetic setting.
 - **Dynamic slot intervals depend on event duration.** F06 calculates slot intervals as `Math.min(duration, 30)`. If F13 adds global default duration settings, the slot interval logic will automatically adapt. No additional configuration for slot intervals is needed in settings.
+
+---
+
+## Impact from F11 Implementation
+
+- **The `meetingBriefEmail` notification preference is now actively used.** F11 checks `notification_preferences.meetingBriefEmail` before sending brief emails (both auto-generated and manual). The settings page (R5: Notification Preferences) should display this toggle so users can control brief email delivery.
+- **Brief delivery depends on F09 email infrastructure.** The `meetingPrepBriefEmail()` template in `server/email-templates.ts` uses the same `sendEmail()` service from F09. If SMTP is not configured, emails are logged to console as a development fallback.
