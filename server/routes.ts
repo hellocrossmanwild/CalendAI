@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertEventTypeSchema, insertBookingSchema } from "@shared/schema";
+import { insertEventTypeSchema, insertBookingSchema, phoneRegex } from "@shared/schema";
 import { enrichLead, generateMeetingBrief, processPrequalChat, processEventTypeCreation } from "./ai-service";
 import { scanWebsite } from "./website-scanner";
 import { getGoogleAuthUrl, exchangeCodeForTokens, calculateAvailability, createCalendarEvent, deleteCalendarEvent, listUserCalendars, isValidTimezone } from "./calendar-service";
@@ -935,7 +935,7 @@ export async function registerRoutes(
 
   app.post("/api/public/book", async (req, res) => {
     try {
-      const { eventTypeSlug, date, time, name, email, company, notes, timezone: clientTimezone, startTimeUTC, chatHistory, documents } = req.body;
+      const { eventTypeSlug, date, time, name, email, phone, company, notes, timezone: clientTimezone, startTimeUTC, chatHistory, documents } = req.body;
 
       const eventType = await storage.getEventTypeBySlug(eventTypeSlug);
       if (!eventType || !eventType.isActive) {
@@ -984,6 +984,11 @@ export async function registerRoutes(
         return res.status(409).json({ error: "This time slot is no longer available" });
       }
 
+      // Validate guest phone number if provided
+      if (phone && !phoneRegex.test(phone)) {
+        return res.status(400).json({ error: "Invalid phone number format" });
+      }
+
       // Create booking — sanitize guest timezone before persisting.
       const validatedTimezone = (clientTimezone && isValidTimezone(clientTimezone))
         ? clientTimezone
@@ -993,6 +998,7 @@ export async function registerRoutes(
         userId: eventType.userId,
         guestName: name,
         guestEmail: email,
+        guestPhone: phone || null,
         guestCompany: company || null,
         startTime,
         endTime,
@@ -1051,16 +1057,22 @@ export async function registerRoutes(
     try {
       const { eventTypeSlug, messages, guestInfo } = req.body;
 
-      const eventType = await storage.getEventTypeBySlug(eventTypeSlug);
+      const eventType = await storage.getEventTypeBySlugWithHost(eventTypeSlug);
       if (!eventType) {
         return res.status(404).json({ error: "Event type not found" });
       }
+
+      // Derive host name server-side (never trust client-provided hostName)
+      const hostName = [eventType.host?.firstName, eventType.host?.lastName]
+        .filter(Boolean)
+        .join(" ") || undefined;
 
       const response = await processPrequalChat(
         messages,
         eventType.name,
         (eventType.questions as string[]) || [],
-        guestInfo
+        guestInfo,
+        hostName
       );
 
       res.json(response);
