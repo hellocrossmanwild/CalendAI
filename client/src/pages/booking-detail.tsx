@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
-import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone, TrendingUp } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone, TrendingUp, CheckCircle, XCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +45,20 @@ export default function BookingDetailPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to generate brief", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: async (newStatus: string) => {
+      return apiRequest("PATCH", `/api/bookings/${params?.id}/status`, { status: newStatus });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings", params?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+      toast({ title: "Booking status updated" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
     },
   });
 
@@ -142,7 +156,15 @@ export default function BookingDetailPage() {
                     </CardDescription>
                   </div>
                 </div>
-                <Badge>{booking.status}</Badge>
+                {booking.status === "completed" ? (
+                  <Badge variant="outline" className="border-green-500 text-green-600">Completed</Badge>
+                ) : booking.status === "cancelled" ? (
+                  <Badge variant="destructive">Cancelled</Badge>
+                ) : booking.status === "no-show" ? (
+                  <Badge variant="outline" className="border-orange-500 text-orange-600">No-Show</Badge>
+                ) : (
+                  <Badge>Confirmed</Badge>
+                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -384,6 +406,47 @@ export default function BookingDetailPage() {
                   All AI features complete
                 </p>
               )}
+              {booking.status !== "cancelled" && (
+                <>
+                  <Separator />
+                  {booking.status === "confirmed" ? (
+                    <div className="space-y-3">
+                      <Button
+                        variant="outline"
+                        className="w-full border-green-500 text-green-600 hover:bg-green-50"
+                        onClick={() => statusMutation.mutate("completed")}
+                        disabled={statusMutation.isPending}
+                        data-testid="button-mark-complete"
+                      >
+                        {statusMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                        )}
+                        Mark Complete
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="w-full border-orange-500 text-orange-600 hover:bg-orange-50"
+                        onClick={() => statusMutation.mutate("no-show")}
+                        disabled={statusMutation.isPending}
+                        data-testid="button-mark-noshow"
+                      >
+                        {statusMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <XCircle className="h-4 w-4 mr-2" />
+                        )}
+                        Mark No-Show
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center py-2">
+                      Status: {booking.status}
+                    </p>
+                  )}
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -397,8 +460,8 @@ export default function BookingDetailPage() {
                   <div
                     className="h-10 w-10 rounded-md flex items-center justify-center"
                     style={{
-                      backgroundColor: `${booking.eventType.color}20`,
-                      color: booking.eventType.color,
+                      backgroundColor: `${booking.eventType.color || "#6366f1"}20`,
+                      color: booking.eventType.color || "#6366f1",
                     }}
                   >
                     <Clock className="h-5 w-5" />

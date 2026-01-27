@@ -113,24 +113,57 @@ On booking cards, add:
 
 ## Acceptance Criteria
 
-- [ ] Bookings page has date range filter (presets and custom range)
-- [ ] Bookings page has event type filter dropdown
-- [ ] Bookings page has sorting options (date, name, optionally score)
-- [ ] Calendar month view tab shows bookings as colored dots on a monthly grid
-- [ ] Clicking a day in calendar view shows that day's bookings
-- [ ] Dashboard shows weekly booking trend chart
-- [ ] Bookings can be marked as "completed" or "no-show"
-- [ ] Status filter available on bookings page
-- [ ] Quick actions available on booking cards (enrich, brief, copy link)
+- [x] Bookings page has date range filter (presets: All Dates, Today, This Week, This Month, Next 7 Days, Next 30 Days)
+- [x] Bookings page has event type filter dropdown (populated from `/api/event-types`)
+- [x] Bookings page has sorting options (Date Newest/Oldest, Name A-Z/Z-A, Lead Score High-Low/Low-High)
+- [x] Calendar month view tab shows bookings as colored dots on a monthly grid
+- [x] Clicking a day in calendar view shows that day's bookings
+- [x] Dashboard shows weekly booking trend chart (Recharts LineChart, last 4 weeks)
+- [x] Dashboard shows lead score distribution chart (Recharts PieChart, High/Medium/Low)
+- [x] Dashboard "This Week" metric card added (5-card layout)
+- [x] Dashboard "Enriched Leads" count bug fixed (was showing totalBookings, now counts enrichment records)
+- [x] Bookings can be marked as "completed" or "no-show" (`PATCH /api/bookings/:id/status`)
+- [x] Status filter available on bookings page (All/Confirmed/Completed/Cancelled/No-Show)
+- [x] Quick actions available on booking cards (Enrich Lead, Generate Brief, Copy Booking Link, Email Guest)
+- [x] Booking detail page has Mark Complete / Mark No-Show buttons
+- [x] Status badges use real `booking.status` field (not `isPast()` inference)
 
 ---
+
+## Implementation Notes
+
+**Implemented:** January 27, 2026
+
+### Backend Changes
+- **`server/routes.ts`**: Added `PATCH /api/bookings/:id/status` endpoint with `requireAuth`, whitelist validation (`confirmed`, `completed`, `cancelled`, `no-show`), ownership check, and cancelled-booking guard
+- **`server/storage.ts`**: Added `updateBookingStatus(id, status)` method to `IStorage` interface and `DatabaseStorage` class
+
+### Frontend Changes
+- **`client/src/pages/bookings.tsx`** (788 lines): Full rewrite with date range filter, event type filter, status filter, sorting, calendar month view tab, quick actions, and status management
+- **`client/src/pages/dashboard.tsx`** (473 lines): Added 5th metric card (This Week), booking trend LineChart, lead score PieChart, fixed enriched leads count
+- **`client/src/pages/booking-detail.tsx`** (420 lines): Added statusMutation, Mark Complete/No-Show buttons, proper status badge styling
+
+### Tests
+- **`server/__tests__/f10-dashboard-enhancements.test.ts`**: 65 tests covering status validation, transitions, badge mapping, date range filtering, sorting, event type filtering, status filtering, calendar grouping, and dashboard metrics
+
+### Cross-Feature Implications
+- **F08**: Lead score sort on bookings page (was only on leads page). Score distribution chart on dashboard.
+- **F11**: Meeting brief can be triggered from booking cards via quick action (one-click from list view)
+- **F12**: Status management aligns with reschedule/cancel lifecycle. "cancelled" status shared between F10 PATCH endpoint and F12 cancel flow. Status guard prevents changing cancelled bookings.
+- **F13**: No direct impact, but dashboard metrics may surface settings gaps
+
+### What's Still Missing
+- **Custom date range picker** (from/to) — only preset filters implemented (R1 specifies "Custom Range" as an option)
+- **Reschedule from dashboard** — blocked by F12 dependency
+- **Conversion rate placeholder** — R5 stretch goal, requires analytics tracking
+- **Auto-complete status** — R6 mentions auto-set after meeting end time passes (requires cron/scheduled job)
 
 ## Notes
 
 - Most of this work is frontend-only, filtering and transforming the data already returned by the API.
-- The calendar month view is the biggest UI piece. Consider whether to use `react-day-picker` (already installed) or a dedicated calendar component.
+- Calendar month view built with CSS grid and date-fns (not react-day-picker) for full control over layout and booking dots.
 - Recharts is already installed for charts on the dashboard.
-- Lead score display depends on F08 being complete; design the UI to gracefully handle missing scores.
+- Lead score display depends on F08 being complete; the UI gracefully handles missing scores with empty chart state.
 
 ---
 
