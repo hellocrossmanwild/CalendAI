@@ -43,6 +43,8 @@ server/
 ├── routes.ts           # API endpoints
 ├── storage.ts          # Database operations
 ├── ai-service.ts       # AI integration (OpenAI)
+├── email-service.ts    # Email delivery (Nodemailer SMTP / console fallback)
+├── email-templates.ts  # HTML email templates (booking, auth, cancellation)
 ├── db.ts               # Database connection
 └── replit_integrations/ # Replit service integrations
 shared/
@@ -52,12 +54,13 @@ shared/
 
 ### Database Schema
 - **eventTypes**: Customizable meeting types (duration, buffer, color)
-- **bookings**: Scheduled meetings with guest info
+- **bookings**: Scheduled meetings with guest info, reschedule/cancel tokens
 - **leadEnrichments**: AI-generated company/personal research
 - **prequalResponses**: Chat history from pre-qualification
 - **documents**: File attachments for bookings
 - **meetingBriefs**: AI-generated prep summaries
 - **calendarTokens**: Google Calendar OAuth tokens
+- **notificationPreferences**: Per-user email notification settings
 
 ## Key Features
 
@@ -90,12 +93,16 @@ shared/
 - `GET /api/calendar/status` - Check calendar connection
 - `GET /api/calendar/connect` - Connect calendar
 - `DELETE /api/calendar/disconnect` - Disconnect calendar
+- `GET /api/notification-preferences` - Get email notification preferences
+- `PATCH /api/notification-preferences` - Update email notification preferences
 
 ### Public Routes
 - `GET /api/public/event-types/:slug` - Get event type by slug
 - `GET /api/public/availability/:slug` - Get available time slots
-- `POST /api/public/book` - Create a booking
+- `POST /api/public/book` - Create a booking (sends confirmation + host notification emails)
 - `POST /api/public/chat` - Process pre-qual chat
+- `GET /api/public/booking/cancel/:token` - Look up booking by cancel token
+- `GET /api/public/booking/reschedule/:token` - Look up booking by reschedule token
 
 ## Design System
 - Primary color: Indigo (#6366f1)
@@ -116,3 +123,4 @@ The application runs with `npm run dev` which starts:
 - Integrated OpenAI for AI features via Replit AI Integrations
 - Added object storage for file uploads
 - Implemented Replit Auth for user authentication
+- **F09: Email Notifications** — Nodemailer SMTP with console fallback, HTML templates for booking confirmation, host notification, cancellation, and auth emails. Reschedule/cancel tokens on bookings. Notification preferences UI. 60 new tests.

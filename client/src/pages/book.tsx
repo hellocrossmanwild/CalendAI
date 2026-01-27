@@ -666,6 +666,10 @@ export default function BookPage() {
                   ? `Your booking with ${hostFullName} is confirmed! You'll find the details below.`
                   : "Your booking is confirmed! You'll find the details below."}
               </p>
+              <p className="text-sm text-muted-foreground mt-2">
+                A confirmation email has been sent to <span className="font-medium">{formData.email}</span>.
+                {" "}If you don't see it, please check your spam folder.
+              </p>
             </div>
 
             <div

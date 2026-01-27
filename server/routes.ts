@@ -7,6 +7,8 @@ import { calculateLeadScore } from "./lead-scoring";
 import { scanWebsite } from "./website-scanner";
 import { getGoogleAuthUrl, exchangeCodeForTokens, calculateAvailability, createCalendarEvent, deleteCalendarEvent, listUserCalendars, isValidTimezone } from "./calendar-service";
 import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
+import { sendEmail } from "./email-service";
+import { authEmail, bookingConfirmationEmail, hostNotificationEmail, cancellationEmailToBooker, cancellationEmailToHost } from "./email-templates";
 import { addMinutes } from "date-fns";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
@@ -40,13 +42,11 @@ function generateToken(): string {
   return crypto.randomBytes(32).toString("hex");
 }
 
-// Stub email sender (logs to console until F09 implements real email)
-function sendEmail(to: string, subject: string, body: string): void {
-  console.log(`\n========== EMAIL (stub) ==========`);
-  console.log(`To: ${to}`);
-  console.log(`Subject: ${subject}`);
-  console.log(`Body: ${body}`);
-  console.log(`==================================\n`);
+// Derive the public base URL for email links.
+// Prefer the BASE_URL env var (prevents host-header injection);
+// fall back to request headers for dev environments.
+function getBaseUrl(req: Request): string {
+  return process.env.BASE_URL || `${req.protocol}://${req.get("host")}`;
 }
 
 function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -97,11 +97,10 @@ export async function registerRoutes(
       const verifyToken = generateToken();
       const verifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
       await storage.createEmailVerificationToken(user.id, verifyToken, verifyExpires);
-      const verifyUrl = `${req.protocol}://${req.get("host")}/auth/verify-email?token=${verifyToken}`;
-      sendEmail(
-        email,
-        "Verify your CalendAI email",
-        `Welcome to CalendAI! Please verify your email by clicking this link: ${verifyUrl}\n\nThis link expires in 24 hours.`
+      const verifyUrl = `${getBaseUrl(req)}/auth/verify-email?token=${verifyToken}`;
+      const verifyEmail = authEmail("email-verification", email, verifyUrl);
+      sendEmail({ to: email, ...verifyEmail }).catch(err =>
+        console.error("Failed to send verification email:", err)
       );
 
       (req.session as any).userId = user.id;
@@ -273,11 +272,10 @@ export async function registerRoutes(
 
       await storage.createMagicLinkToken(email, token, expiresAt);
 
-      const magicUrl = `${req.protocol}://${req.get("host")}/auth/magic-link?token=${token}`;
-      sendEmail(
-        email,
-        "Your CalendAI login link",
-        `Click here to sign in to CalendAI: ${magicUrl}\n\nThis link expires in 15 minutes. If you didn't request this, you can safely ignore this email.`
+      const magicUrl = `${getBaseUrl(req)}/auth/magic-link?token=${token}`;
+      const magicEmail = authEmail("magic-link", email, magicUrl);
+      sendEmail({ to: email, ...magicEmail }).catch(err =>
+        console.error("Failed to send magic link email:", err)
       );
 
       res.json({ success: true, message: "If an account exists with that email, a login link has been sent" });
@@ -345,11 +343,10 @@ export async function registerRoutes(
         const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
         await storage.createPasswordResetToken(user.id, token, expiresAt);
 
-        const resetUrl = `${req.protocol}://${req.get("host")}/auth/reset-password?token=${token}`;
-        sendEmail(
-          email,
-          "Reset your CalendAI password",
-          `Click here to reset your password: ${resetUrl}\n\nThis link expires in 1 hour. If you didn't request this, you can safely ignore this email.`
+        const resetUrl = `${getBaseUrl(req)}/auth/reset-password?token=${token}`;
+        const resetEmail = authEmail("password-reset", email, resetUrl);
+        sendEmail({ to: email, ...resetEmail }).catch(err =>
+          console.error("Failed to send password reset email:", err)
         );
       }
 
@@ -423,11 +420,10 @@ export async function registerRoutes(
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
       await storage.createEmailVerificationToken(req.user.id, token, expiresAt);
 
-      const verifyUrl = `${req.protocol}://${req.get("host")}/auth/verify-email?token=${token}`;
-      sendEmail(
-        req.user.email,
-        "Verify your CalendAI email",
-        `Please verify your email by clicking this link: ${verifyUrl}\n\nThis link expires in 24 hours.`
+      const verifyUrl = `${getBaseUrl(req)}/auth/verify-email?token=${token}`;
+      const verifyTpl = authEmail("email-verification", req.user.email, verifyUrl);
+      sendEmail({ to: req.user.email, ...verifyTpl }).catch(err =>
+        console.error("Failed to send verification email:", err)
       );
 
       res.json({ success: true, message: "Verification email sent" });
@@ -553,6 +549,51 @@ export async function registerRoutes(
 
       await storage.deleteBooking(parseInt(req.params.id));
       res.status(204).send();
+
+      // Fire-and-forget: send cancellation emails (F09 R4)
+      (async () => {
+        try {
+          const eventType = await storage.getEventType(booking.eventTypeId);
+          if (!eventType) return;
+          const host = await storage.getUser(booking.userId);
+          const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Host" : "Host";
+          const hostTimezone = (await storage.getAvailabilityRules(booking.userId))?.timezone || "UTC";
+          const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+          // Email to booker
+          const bookerTpl = cancellationEmailToBooker({
+            guestName: booking.guestName,
+            hostName,
+            eventTypeName: eventType.name,
+            startTime: booking.startTime,
+            guestTimezone: booking.timezone,
+            eventTypeSlug: eventType.slug,
+            baseUrl,
+          });
+          sendEmail({ to: booking.guestEmail, ...bookerTpl }).catch(err =>
+            console.error("Failed to send cancellation email to booker:", err)
+          );
+
+          // Email to host (check preferences)
+          const prefs = await storage.getNotificationPreferences(booking.userId);
+          const shouldNotify = prefs?.cancellationEmail !== false;
+          if (shouldNotify && host?.email) {
+            const hostTpl = cancellationEmailToHost({
+              guestName: booking.guestName,
+              hostName,
+              eventTypeName: eventType.name,
+              startTime: booking.startTime,
+              hostTimezone,
+              baseUrl,
+            });
+            sendEmail({ to: host.email, ...hostTpl }).catch(err =>
+              console.error("Failed to send cancellation email to host:", err)
+            );
+          }
+        } catch (err) {
+          console.error("Failed to send cancellation emails:", err);
+        }
+      })();
     } catch (error) {
       console.error("Error deleting booking:", error);
       res.status(500).json({ error: "Failed to delete booking" });
@@ -929,6 +970,86 @@ export async function registerRoutes(
     }
   });
 
+  // Notification Preferences (F09 R6)
+  app.get("/api/notification-preferences", requireAuth, async (req, res) => {
+    try {
+      const prefs = await storage.getNotificationPreferences(req.user!.id);
+      if (!prefs) {
+        // Return defaults when no record exists
+        return res.json({
+          userId: req.user!.id,
+          newBookingEmail: true,
+          meetingBriefEmail: true,
+          dailyDigest: false,
+          cancellationEmail: true,
+        });
+      }
+      res.json(prefs);
+    } catch (error) {
+      console.error("Error fetching notification preferences:", error);
+      res.status(500).json({ error: "Failed to fetch notification preferences" });
+    }
+  });
+
+  app.patch("/api/notification-preferences", requireAuth, async (req, res) => {
+    try {
+      const { newBookingEmail, meetingBriefEmail, dailyDigest, cancellationEmail } = req.body;
+      const prefs = await storage.upsertNotificationPreferences({
+        userId: req.user!.id,
+        newBookingEmail: newBookingEmail ?? undefined,
+        meetingBriefEmail: meetingBriefEmail ?? undefined,
+        dailyDigest: dailyDigest ?? undefined,
+        cancellationEmail: cancellationEmail ?? undefined,
+      });
+      res.json(prefs);
+    } catch (error) {
+      console.error("Error updating notification preferences:", error);
+      res.status(500).json({ error: "Failed to update notification preferences" });
+    }
+  });
+
+  // Public token-based booking lookup (F09 R3 — scaffolding for F12)
+  app.get("/api/public/booking/cancel/:token", async (req, res) => {
+    try {
+      const booking = await storage.getBookingByCancelToken(req.params.token);
+      if (!booking || booking.status === "cancelled") {
+        return res.status(404).json({ error: "Booking not found or already cancelled" });
+      }
+      const eventType = await storage.getEventType(booking.eventTypeId);
+      res.json({
+        id: booking.id,
+        guestName: booking.guestName,
+        eventTypeName: eventType?.name || "Meeting",
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        status: booking.status,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to look up booking" });
+    }
+  });
+
+  app.get("/api/public/booking/reschedule/:token", async (req, res) => {
+    try {
+      const booking = await storage.getBookingByRescheduleToken(req.params.token);
+      if (!booking || booking.status === "cancelled") {
+        return res.status(404).json({ error: "Booking not found or cancelled" });
+      }
+      const eventType = await storage.getEventType(booking.eventTypeId);
+      res.json({
+        id: booking.id,
+        guestName: booking.guestName,
+        eventTypeName: eventType?.name || "Meeting",
+        eventTypeSlug: eventType?.slug,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        status: booking.status,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to look up booking" });
+    }
+  });
+
   // Public Routes - Booking Page
   app.get("/api/public/event-types/:slug", async (req, res) => {
     try {
@@ -974,6 +1095,11 @@ export async function registerRoutes(
   app.post("/api/public/book", async (req, res) => {
     try {
       const { eventTypeSlug, date, time, name, email, phone, company, notes, timezone: clientTimezone, startTimeUTC, chatHistory, documents } = req.body;
+
+      // Validate guest email (F09-A1 security fix)
+      if (!email || !isValidEmail(email)) {
+        return res.status(400).json({ error: "Valid email address is required" });
+      }
 
       const eventType = await storage.getEventTypeBySlug(eventTypeSlug);
       if (!eventType || !eventType.isActive) {
@@ -1031,6 +1157,10 @@ export async function registerRoutes(
       const validatedTimezone = (clientTimezone && isValidTimezone(clientTimezone))
         ? clientTimezone
         : "UTC";
+      // Generate reschedule/cancel tokens (F09 R3)
+      const rescheduleToken = generateToken();
+      const cancelToken = generateToken();
+
       const booking = await storage.createBooking({
         eventTypeId: eventType.id,
         userId: eventType.userId,
@@ -1043,6 +1173,8 @@ export async function registerRoutes(
         status: "confirmed",
         timezone: validatedTimezone,
         notes: notes || null,
+        rescheduleToken,
+        cancelToken,
       });
 
       // Save pre-qual chat if exists
@@ -1085,6 +1217,71 @@ export async function registerRoutes(
       }
 
       res.status(201).json({ ...booking, calendarEventId: calendarEventId || booking.calendarEventId });
+
+      // Fire-and-forget: send confirmation emails (F09 R4)
+      (async () => {
+        try {
+          // Resolve host info for emails
+          const host = await storage.getUser(eventType.userId);
+          const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Your host" : "Your host";
+          const hostTimezone = (await storage.getAvailabilityRules(eventType.userId))?.timezone || "UTC";
+          const baseUrl = `${req.protocol}://${req.get("host")}`;
+
+          // 1. Booker confirmation email
+          const confirmTpl = bookingConfirmationEmail({
+            guestName: name,
+            guestEmail: email,
+            hostName,
+            eventTypeName: eventType.name,
+            startTime,
+            endTime,
+            duration: eventType.duration,
+            guestTimezone: validatedTimezone,
+            hostTimezone,
+            location: eventType.location,
+            calendarEventId: calendarEventId || null,
+            rescheduleToken,
+            cancelToken,
+            baseUrl,
+          });
+          sendEmail({ to: email, ...confirmTpl }).catch(err =>
+            console.error("Failed to send booking confirmation:", err)
+          );
+
+          // 2. Host notification email (check preferences first)
+          const prefs = await storage.getNotificationPreferences(eventType.userId);
+          const shouldNotifyHost = prefs?.newBookingEmail !== false; // default true
+
+          if (shouldNotifyHost && host?.email) {
+            // Get pre-qual summary if available
+            const prequalResp = await storage.getPrequalResponse(booking.id);
+            const extracted = prequalResp?.extractedData as Record<string, any> | null;
+
+            const hostTpl = hostNotificationEmail({
+              guestName: name,
+              guestEmail: email,
+              guestCompany: company || null,
+              guestPhone: phone || null,
+              hostName,
+              eventTypeName: eventType.name,
+              startTime,
+              endTime,
+              duration: eventType.duration,
+              guestTimezone: validatedTimezone,
+              hostTimezone,
+              location: eventType.location,
+              baseUrl,
+              prequalSummary: extracted?.summary as string | undefined || null,
+              // Score not included here — enrichment is async and may not be ready
+            });
+            sendEmail({ to: host.email, ...hostTpl }).catch(err =>
+              console.error("Failed to send host notification:", err)
+            );
+          }
+        } catch (err) {
+          console.error("Failed to send booking emails:", err);
+        }
+      })();
 
       // Fire-and-forget: auto-enrich and score the new booking
       (async () => {

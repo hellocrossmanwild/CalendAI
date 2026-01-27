@@ -42,6 +42,8 @@ export const bookings = pgTable("bookings", {
   timezone: text("timezone").notNull().default("UTC"),
   notes: text("notes"),
   calendarEventId: text("calendar_event_id"),
+  rescheduleToken: text("reschedule_token").unique(),
+  cancelToken: text("cancel_token").unique(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
@@ -138,6 +140,18 @@ export const calendarTokens = pgTable("calendar_tokens", {
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
+// Notification Preferences - email notification settings per user
+export const notificationPreferences = pgTable("notification_preferences", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().unique(),
+  newBookingEmail: boolean("new_booking_email").default(true),
+  meetingBriefEmail: boolean("meeting_brief_email").default(true),
+  dailyDigest: boolean("daily_digest").default(false),
+  cancellationEmail: boolean("cancellation_email").default(true),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
 // Relations
 export const eventTypesRelations = relations(eventTypes, ({ many }) => ({
   bookings: many(bookings),
@@ -230,6 +244,12 @@ export const insertCalendarTokenSchema = createInsertSchema(calendarTokens).omit
   updatedAt: true,
 });
 
+export const insertNotificationPreferencesSchema = createInsertSchema(notificationPreferences).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Types
 export type EventType = typeof eventTypes.$inferSelect;
 export type InsertEventType = z.infer<typeof insertEventTypeSchema>;
@@ -254,6 +274,9 @@ export type InsertAvailabilityRules = z.infer<typeof insertAvailabilityRulesSche
 
 export type CalendarToken = typeof calendarTokens.$inferSelect;
 export type InsertCalendarToken = z.infer<typeof insertCalendarTokenSchema>;
+
+export type NotificationPreferences = typeof notificationPreferences.$inferSelect;
+export type InsertNotificationPreferences = z.infer<typeof insertNotificationPreferencesSchema>;
 
 // Host info exposed on public booking pages (safe fields only)
 export type EventTypeHost = {

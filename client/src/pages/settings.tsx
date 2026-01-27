@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, Link as LinkIcon, Copy, ExternalLink, Loader2, CheckCircle, AlertCircle, User, LogOut, Clock, Plus, Trash2 } from "lucide-react";
+import { Calendar, Link as LinkIcon, Copy, ExternalLink, Loader2, CheckCircle, AlertCircle, User, LogOut, Clock, Plus, Trash2, Bell } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -213,6 +213,34 @@ export default function SettingsPage() {
     },
     onError: () => {
       toast({ title: "Failed to save availability settings", variant: "destructive" });
+    },
+  });
+
+  // Notification preferences (F09 R6)
+  const { data: notifPrefs } = useQuery<{
+    newBookingEmail: boolean;
+    meetingBriefEmail: boolean;
+    dailyDigest: boolean;
+    cancellationEmail: boolean;
+  }>({
+    queryKey: ["/api/notification-preferences"],
+  });
+
+  const updateNotifPrefsMutation = useMutation({
+    mutationFn: async (prefs: {
+      newBookingEmail?: boolean;
+      meetingBriefEmail?: boolean;
+      dailyDigest?: boolean;
+      cancellationEmail?: boolean;
+    }) => {
+      return apiRequest("PATCH", "/api/notification-preferences", prefs);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/notification-preferences"] });
+      toast({ title: "Notification preferences saved" });
+    },
+    onError: () => {
+      toast({ title: "Failed to save notification preferences", variant: "destructive" });
     },
   });
 
@@ -687,6 +715,74 @@ export default function SettingsPage() {
               <Copy className="h-4 w-4 mr-2" />
               Copy Embed Code
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Notification Preferences (F09 R6) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Email Notifications
+          </CardTitle>
+          <CardDescription>Choose which email notifications you receive</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="notif-new-booking" className="font-medium">New booking</Label>
+              <p className="text-sm text-muted-foreground">Receive an email when someone books a meeting</p>
+            </div>
+            <Switch
+              id="notif-new-booking"
+              checked={notifPrefs?.newBookingEmail ?? true}
+              onCheckedChange={(checked) =>
+                updateNotifPrefsMutation.mutate({ newBookingEmail: checked })
+              }
+            />
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="notif-cancellation" className="font-medium">Cancellation</Label>
+              <p className="text-sm text-muted-foreground">Receive an email when a booking is cancelled</p>
+            </div>
+            <Switch
+              id="notif-cancellation"
+              checked={notifPrefs?.cancellationEmail ?? true}
+              onCheckedChange={(checked) =>
+                updateNotifPrefsMutation.mutate({ cancellationEmail: checked })
+              }
+            />
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="notif-meeting-brief" className="font-medium">Meeting brief</Label>
+              <p className="text-sm text-muted-foreground">Receive an email with your AI meeting prep brief</p>
+            </div>
+            <Switch
+              id="notif-meeting-brief"
+              checked={notifPrefs?.meetingBriefEmail ?? true}
+              onCheckedChange={(checked) =>
+                updateNotifPrefsMutation.mutate({ meetingBriefEmail: checked })
+              }
+            />
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="notif-daily-digest" className="font-medium">Daily digest</Label>
+              <p className="text-sm text-muted-foreground">Receive a daily summary of upcoming bookings</p>
+            </div>
+            <Switch
+              id="notif-daily-digest"
+              checked={notifPrefs?.dailyDigest ?? false}
+              onCheckedChange={(checked) =>
+                updateNotifPrefsMutation.mutate({ dailyDigest: checked })
+              }
+            />
           </div>
         </CardContent>
       </Card>

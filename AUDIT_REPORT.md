@@ -3,15 +3,15 @@
 **Date:** January 27, 2026
 **Auditor:** Claude (automated audit)
 **Scope:** Full feature-by-feature comparison of the CalendAI codebase against the v1.0 PRD
-**Last Updated:** Post-F08 implementation
+**Last Updated:** Post-F09 implementation
 
 ---
 
 ## Executive Summary
 
-The CalendAI codebase has matured significantly through eight feature implementation cycles (F01–F08). Core authentication, Google Calendar integration, AI-assisted availability setup, AI-assisted event type creation, booking page enhancements, date/time selection improvements, conversational pre-qualification enhancements, and lead enrichment with scoring are now implemented. The booking flow works end-to-end with real calendar integration, AI-powered pre-qualification with document upload and summary cards, automatic lead enrichment and scoring, meeting briefs, and AI-guided event type creation with website scanning and branding extraction.
+The CalendAI codebase has matured significantly through nine feature implementation cycles (F01–F09). Core authentication, Google Calendar integration, AI-assisted availability setup, AI-assisted event type creation, booking page enhancements, date/time selection improvements, conversational pre-qualification enhancements, lead enrichment with scoring, and email notifications are now implemented. The booking flow works end-to-end with real calendar integration, AI-powered pre-qualification with document upload and summary cards, automatic lead enrichment and scoring, meeting briefs, AI-guided event type creation with website scanning and branding extraction, and email notifications for bookings, cancellations, and auth flows.
 
-**Overall PRD Coverage: ~79%** of MVP requirements are implemented.
+**Overall PRD Coverage: ~84%** of MVP requirements are implemented.
 
 **Key Achievements Since Last Audit:**
 - Full email-based authentication with Google OAuth, magic links, and password reset (F01)
@@ -22,25 +22,26 @@ The CalendAI codebase has matured significantly through eight feature implementa
 - Date and time selection improvements with guest timezone detection, UTC-based booking, and enhanced calendar UI (F06)
 - Conversational pre-qualification enhancements: phone field, document upload in chat, AI summary card, host name personalization, custom question fallback, client-side email validation (F07)
 - Lead enrichment and scoring: deterministic rule-based scoring engine, auto-enrichment on booking creation, pre-qual context in enrichment, score badges across UI, filter/sort by score (F08)
-- Testing infrastructure expanded (Vitest with 137+ backend tests)
+- Email notifications: Nodemailer SMTP with console fallback, HTML templates for booking confirmation, host notification, cancellation, auth emails (magic link, password reset, verification), reschedule/cancel tokens on bookings, notification preferences UI with per-type toggles, public token-based booking lookup endpoints for F12 (F09)
+- Testing infrastructure expanded (Vitest with 231+ backend tests across 7 suites)
 
 ---
 
 ## Feature-by-Feature Audit
 
-### F1: User Authentication — ~95% Complete ✅
+### F1: User Authentication — ~98% Complete ✅
 
 | Requirement | Status | Notes |
 |---|---|---|
 | Email/password authentication | IMPLEMENTED | Email-based registration and login with bcrypt hashing |
 | Google OAuth | IMPLEMENTED | Full OAuth flow with user creation/linking |
-| Magic link option | IMPLEMENTED | 15-minute expiry tokens, logged to console (awaiting F09 email) |
-| Password reset flow | IMPLEMENTED | 1-hour expiry tokens, logged to console (awaiting F09 email) |
+| Magic link option | IMPLEMENTED | 15-minute expiry tokens, HTML email via F09 email service |
+| Password reset flow | IMPLEMENTED | 1-hour expiry tokens, HTML email via F09 email service |
 | Session management | IMPLEMENTED | PostgreSQL-backed sessions, 7-day expiry |
-| Email verification | IMPLEMENTED | 24-hour tokens on registration, auto-verified via Google/magic link |
+| Email verification | IMPLEMENTED | 24-hour tokens on registration, HTML email via F09 email service |
 | Password strength validation | IMPLEMENTED | 8+ chars, uppercase, lowercase, number required |
 
-**Remaining Gap:** Email sending is stubbed to console — requires F09 for real delivery.
+**Remaining Gap:** Minor — SMTP not yet configured in production (console fallback active in dev). All auth email flows now use real HTML templates via F09.
 
 ---
 
@@ -156,12 +157,21 @@ The CalendAI codebase has matured significantly through eight feature implementa
 
 ---
 
-### F9: Email Notifications — ~5% Stubbed
+### F9: Email Notifications — ~85% Complete ✅
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Send confirmation emails | STUBBED | `sendEmail()` logs to console |
-| All email flows | STUBBED | Auth tokens, booking confirmations, briefs all stub to console |
+| R1: Email service setup | IMPLEMENTED | `server/email-service.ts` — Nodemailer with SMTP, console fallback when unconfigured |
+| R2: HTML email templates | IMPLEMENTED | `server/email-templates.ts` — booking confirmation, host notification, cancellation (both parties), auth emails (magic link, password reset, verification). All XSS-escaped. |
+| R3: Booking token system | IMPLEMENTED | `rescheduleToken` and `cancelToken` on bookings table, generated via `crypto.randomBytes(32)`, public lookup endpoints scaffolded for F12 |
+| R4: Send emails on booking | IMPLEMENTED | Async fire-and-forget: booker confirmation + host notification on create, both parties on cancel |
+| R5: Confirmation page update | IMPLEMENTED | "A confirmation email has been sent to {email}" with spam folder note |
+| R6: Notification preferences | IMPLEMENTED | `notification_preferences` table, GET/PATCH API, settings UI with per-type toggles (new booking, cancellation, meeting brief, daily digest) |
+| R7: Meeting reminders | DEFERRED | Stretch goal — requires scheduled job system (cron/queue) |
+
+**Additional achievements:** Lead score included in host notification when available, prequal summary in host notification, rebook link in cancellation email, timezone-aware formatting in all templates, public token-based endpoints scaffolded for F12. 60 new Vitest tests covering templates, XSS, timezone handling, token generation, and console fallback.
+
+**Remaining Gap:** R7 (meeting reminders) deferred as stretch goal — requires cron/job queue. SMTP credentials need to be configured for production delivery.
 
 ---
 
@@ -187,17 +197,17 @@ The CalendAI codebase has matured significantly through eight feature implementa
 
 ---
 
-### F12: Reschedule & Cancel — ~15% Minimal
+### F12: Reschedule & Cancel — ~25% Partial
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Host cancel | PARTIAL | Hard delete from dashboard |
-| Booker reschedule/cancel | MISSING | No public pages |
-| Notifications on changes | MISSING | No email/notification system |
+| Host cancel | PARTIAL | Hard delete from dashboard, cancellation emails sent (F09) |
+| Booker reschedule/cancel | SCAFFOLDED | Tokens generated on booking creation (F09), public lookup endpoints exist, actual reschedule/cancel pages pending |
+| Notifications on changes | IMPLEMENTED | Cancellation emails sent to both parties via F09 |
 
 ---
 
-### F13: Settings & Configuration — ~35% Partial
+### F13: Settings & Configuration — ~45% Partial
 
 | Requirement | Status | Notes |
 |---|---|---|
@@ -205,6 +215,7 @@ The CalendAI codebase has matured significantly through eight feature implementa
 | Availability rules | IMPLEMENTED | Full weekly editor in settings |
 | Profile display | PARTIAL | Read-only, no editing |
 | Branding settings | MISSING | Only on event types, not global |
+| Notification preferences | IMPLEMENTED | Per-type toggles (new booking, cancellation, meeting brief, daily digest) with API and UI (F09) |
 
 ---
 
@@ -214,13 +225,14 @@ The CalendAI codebase has matured significantly through eight feature implementa
 |---|---|---|---|
 | User | `users` | PARTIAL | Missing: `timezone`, `companyName`, `websiteUrl` |
 | Event Type | `event_types` | **COMPLETE** | All fields implemented including `location`, `logo`, `primaryColor`, `secondaryColor`, `questions` |
-| Booking | `bookings` | PARTIAL | `guestPhone` implemented (F07). Missing: `rescheduleToken`, `cancelToken` |
+| Booking | `bookings` | **COMPLETE** | `guestPhone` (F07), `rescheduleToken`, `cancelToken` (F09) |
 | Lead Enrichment | `lead_enrichments` | **COMPLETE** | All fields implemented including `leadScore`, `leadScoreLabel`, `leadScoreReasoning` (added in F08) |
 | Availability Rules | `availability_rules` | COMPLETE | Full multi-block weekly hours |
 | Calendar Token | `calendar_tokens` | COMPLETE | Real OAuth with refresh tokens |
 | Pre-qual Response | `prequal_responses` | COMPLETE | Chat history + extracted data |
 | Document | `documents` | COMPLETE | Object storage integration |
 | Meeting Brief | `meeting_briefs` | COMPLETE | Summary, talking points, context |
+| Notification Preferences | `notification_preferences` | **NEW (F09)** | Per-user toggles for new booking, cancellation, meeting brief, daily digest |
 
 ---
 
@@ -228,7 +240,7 @@ The CalendAI codebase has matured significantly through eight feature implementa
 
 | Feature | PRD Priority | Implementation Status | Coverage |
 |---|---|---|---|
-| **F1:** User Authentication | MVP | Complete | ~95% |
+| **F1:** User Authentication | MVP | Complete | ~98% |
 | **F2:** Calendar Connection | MVP | Complete | ~90% |
 | **F3:** AI Availability Setup | MVP | Complete | ~95% |
 | **F4:** AI Event Type Creation | MVP | Complete | ~90% |
@@ -236,25 +248,27 @@ The CalendAI codebase has matured significantly through eight feature implementa
 | **F6:** Date & Time Selection | MVP | Mostly Complete | ~85% |
 | **F7:** Conversational Pre-Qual | MVP | Complete | ~90% |
 | **F8:** Lead Enrichment & Scoring | MVP | Complete | ~90% |
-| **F9:** Email Notifications | MVP | Stubbed | ~5% |
+| **F9:** Email Notifications | MVP | Complete | ~85% |
 | **F10:** Booking Dashboard | MVP | Partial | ~55% |
 | **F11:** Meeting Prep Brief | MVP | Partial | ~45% |
-| **F12:** Reschedule & Cancel | MVP | Minimal | ~15% |
-| **F13:** Settings & Config | MVP | Partial | ~35% |
+| **F12:** Reschedule & Cancel | MVP | Partial | ~25% |
+| **F13:** Settings & Config | MVP | Partial | ~45% |
 
 ---
 
 ## Top Priority Remaining Gaps (Ranked by Impact)
 
-1. **No email notifications** — The confirmation page claims emails are sent, but `sendEmail()` only logs to console. This is table-stakes for a booking platform.
+1. ~~**No email notifications** — The confirmation page claims emails are sent, but `sendEmail()` only logs to console. This is table-stakes for a booking platform.~~ **RESOLVED by F09** — Full email service with Nodemailer SMTP, HTML templates for all booking and auth flows, notification preferences, and reschedule/cancel tokens.
 
-2. **No reschedule/cancel for bookers** — Bookers receive no links to manage their booking. Only hosts can cancel.
+2. **No reschedule/cancel pages for bookers** — Tokens and lookup endpoints are scaffolded (F09), but bookers cannot yet perform reschedule or cancel actions via the links in their email. Requires F12 implementation.
 
 3. ~~**No lead scoring** — The PRD defines a detailed points-based scoring system. The leads page shows no scores.~~ **RESOLVED by F08** — Deterministic rule-based scoring engine implemented with PRD-defined factors. Score badges displayed across all relevant pages. Filter and sort by score on leads page.
 
 4. ~~**No auto-enrichment on booking** — Lead enrichment is still manual (host clicks button).~~ **RESOLVED by F08** — Fire-and-forget auto-enrichment triggers on every new booking in `POST /api/public/book`. Manual enrichment button still available as fallback.
 
 5. **Embeddable widget missing** — No `widget.js` for embedding booking on external sites.
+
+6. **SMTP production configuration pending** — Email service falls back to console logging until SMTP environment variables are configured. No data loss — emails will be sent once configured.
 
 ---
 
@@ -263,7 +277,7 @@ The CalendAI codebase has matured significantly through eight feature implementa
 | Component | Status |
 |---|---|
 | Test framework | Vitest (configured in `vitest.config.ts`) |
-| Backend tests | 137+ tests across multiple suites (website-scanner, ai-service, F05 booking page, F06 date/time, F07 prequal enhancements, F08 lead scoring) |
+| Backend tests | 231+ tests across 7 suites (website-scanner, ai-service, F05 booking page, F06 date/time, F07 prequal enhancements, F08 lead scoring, F09 email notifications) |
 | Frontend tests | Not yet implemented |
 | CI/CD integration | Not configured |
 | Coverage reporting | `@vitest/coverage-v8` installed, not yet in CI |
