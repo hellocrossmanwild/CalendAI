@@ -306,3 +306,9 @@ CREATE TABLE notification_preferences (
 - **Confirmation page now shows booking details.** F05 added date, time, event type, host name, ICS download, and Google Calendar link to the confirmation page. F09's R5 scope is reduced to adding the email-related messaging once delivery is functional.
 - **`guestTimezone` is now stored on bookings.** F05 added this field. Email templates can use it to format times in the booker's timezone (e.g., "Your call is on Monday at 2:00 PM EST").
 - **Host info available on public API.** F05 expanded the public event type endpoint to include host firstName, lastName, and profileImageUrl. Email templates can reference host data for personalization.
+
+### Impact from F06 Implementation
+
+- **Guest timezone (`guestTimezone`) is now a validated IANA timezone stored on bookings.** F06 implemented `isValidTimezone()` to validate timezone strings before storage. Email templates can reliably use this field for timezone-aware time formatting in confirmation and reminder emails (e.g., using `Intl.DateTimeFormat` with the stored timezone to render "Monday, Feb 3 at 2:00 PM EST").
+- **UTC timestamps are available for accurate scheduling.** F06's availability API now returns `utc` ISO timestamps alongside display times, and the booking endpoint accepts `startTimeUTC`. Email templates should use these UTC timestamps as the source of truth and format them into the recipient's timezone for display.
+- **Server-side timezone conversion pattern established.** F06 uses native `Intl.DateTimeFormat` for timezone conversion in `calculateAvailability()`. The email template rendering logic can reuse this same approach to format meeting times in both the host's and guest's timezones within a single email (e.g., "2:00 PM EST / 11:00 AM PST").

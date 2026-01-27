@@ -1,12 +1,7 @@
 import { google, calendar_v3 } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import {
-  startOfDay,
-  endOfDay,
   addMinutes,
-  setHours,
-  setMinutes,
-  format,
   isBefore,
   isAfter,
 } from "date-fns";
@@ -25,6 +20,7 @@ export interface CalendarEvent {
 export interface TimeSlot {
   time: string;
   available: boolean;
+  utc: string;
 }
 
 interface BookingData {
@@ -48,9 +44,97 @@ const SCOPES = [
 
 const DEFAULT_WORKING_HOURS_START = 9; // 9 AM
 const DEFAULT_WORKING_HOURS_END = 17; // 5 PM
-const SLOT_INTERVAL_MINUTES = 30;
 
 const DAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+// ---------------------------------------------------------------------------
+// Timezone Helpers (native Intl — no external dependency)
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate whether a string is a valid IANA timezone identifier.
+ * Returns true for valid timezones (e.g. "America/New_York"), false otherwise.
+ */
+export function isValidTimezone(tz: string): boolean {
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Create a UTC Date representing a specific wall-clock time in a given timezone.
+ *
+ * Example: wallClockToUTC(2026, 1, 27, 9, 0, "America/New_York")
+ * returns the UTC instant when it is 9:00 AM in New York on Jan 27, 2026.
+ */
+function wallClockToUTC(
+  year: number,
+  month: number,
+  day: number,
+  hours: number,
+  minutes: number,
+  timezone: string,
+): Date {
+  // Start with a "guess": treat the wall-clock values as if they were UTC.
+  const guessMs = Date.UTC(year, month - 1, day, hours, minutes, 0, 0);
+  const guess = new Date(guessMs);
+
+  // Ask Intl what wall-clock values the *guess* instant shows in the target TZ.
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
+  }).formatToParts(guess);
+
+  const get = (type: string): number => {
+    const val = parts.find((p) => p.type === type)?.value ?? "0";
+    return parseInt(val, 10);
+  };
+
+  let h = get("hour");
+  if (h === 24) h = 0; // midnight edge case in some locales
+
+  // Compute what UTC timestamp the TZ wall-clock values correspond to.
+  const tzWallMs = Date.UTC(get("year"), get("month") - 1, get("day"), h, get("minute"), 0, 0);
+
+  // The offset (in ms) between the guess instant and what the TZ shows.
+  const offsetMs = tzWallMs - guessMs;
+
+  // The correct UTC instant is the guess shifted back by that offset.
+  return new Date(guessMs - offsetMs);
+}
+
+/**
+ * Format a UTC Date for display in a specific timezone (e.g. "2:00 PM").
+ */
+function formatTimeInTimezone(date: Date, timezone: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+}
+
+/**
+ * Get the calendar-date components (year, month 1-based, day) from a Date's
+ * UTC values. Client-sent ISO strings encode the selected calendar date in UTC.
+ */
+function getUTCDateParts(date: Date): { year: number; month: number; day: number } {
+  return {
+    year: date.getUTCFullYear(),
+    month: date.getUTCMonth() + 1,
+    day: date.getUTCDate(),
+  };
+}
 
 function createOAuth2Client(redirectUri?: string): OAuth2Client {
   return new google.auth.OAuth2(
@@ -233,15 +317,21 @@ export async function getCalendarEvents(
  * 3. Checks if the requested date is within min notice and max advance limits.
  * 4. Fetches Google Calendar events for the date (if connected).
  * 5. Fetches existing CalendAI bookings for the date.
- * 6. Generates slots within configured working hours for the day of the week.
+ * 6. Generates slots within configured working hours for the day of the week,
+ *    using the host's timezone for working-hour interpretation.
  * 7. Marks slots as unavailable when they overlap with existing events or
  *    bookings (buffers included).
  * 8. Filters out slots in the past and those within min notice period.
+ * 9. Returns slots with display times in the guest's timezone and UTC stamps.
+ *
+ * @param guestTimezone  IANA timezone for the booker (e.g. "America/New_York").
+ *                       When omitted, display times fall back to the host timezone.
  */
 export async function calculateAvailability(
   userId: string,
   eventTypeId: number,
   date: Date,
+  guestTimezone?: string,
 ): Promise<TimeSlot[]> {
   try {
     // Fetch event type for duration + buffer config.
@@ -254,29 +344,50 @@ export async function calculateAvailability(
     const bufferBefore = eventType.bufferBefore ?? 0;
     const bufferAfter = eventType.bufferAfter ?? 0;
 
+    // Dynamic slot interval: min(duration, 30) so 15-min events get 15-min
+    // intervals while 30+ min events keep the standard 30-min grid.
+    const slotInterval = Math.min(duration, 30);
+
     // Fetch availability rules for the host (F03)
     const rules = await storage.getAvailabilityRules(userId);
     const minNotice = rules?.minNotice ?? 1440; // default 24 hours
     const maxAdvance = rules?.maxAdvance ?? 60;  // default 60 days
 
-    const now = new Date();
-    const dayStart = startOfDay(date);
+    // Host timezone from availability rules (or UTC as fallback).
+    const hostTimezone = rules?.timezone || "UTC";
+    // Display timezone: prefer guest's, fall back to host's.
+    const displayTimezone = guestTimezone && isValidTimezone(guestTimezone)
+      ? guestTimezone
+      : hostTimezone;
 
-    // Check max advance limit: if the requested date is too far in the future
-    const maxAdvanceDate = addMinutes(startOfDay(now), maxAdvance * 24 * 60);
-    if (isAfter(dayStart, maxAdvanceDate)) {
+    const now = new Date();
+
+    // Extract the calendar date the guest selected (encoded as UTC date parts).
+    const { year, month, day } = getUTCDateParts(date);
+
+    // Check max advance limit: compare against the requested date interpreted
+    // in the host's timezone.
+    const requestedDayStart = wallClockToUTC(year, month, day, 0, 0, hostTimezone);
+    const maxAdvanceDate = addMinutes(now, maxAdvance * 24 * 60);
+    if (isAfter(requestedDayStart, maxAdvanceDate)) {
       return [];
     }
 
-    // Determine the day of the week and look up configured hours
-    const dayOfWeek = DAY_NAMES[date.getDay()]; // 0=sunday, 1=monday, etc.
+    // Determine the day of the week in the host's timezone.
+    // We use the host-timezone wall clock to find the weekday name.
+    const hostDayParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: hostTimezone,
+      weekday: "long",
+    }).formatToParts(requestedDayStart);
+    const hostWeekday = (hostDayParts.find((p) => p.type === "weekday")?.value ?? "").toLowerCase();
+
     const weeklyHours = rules?.weeklyHours as {
       [day: string]: { start: string; end: string }[] | null;
     } | null;
 
     let timeBlocks: { start: string; end: string }[];
-    if (weeklyHours && dayOfWeek in weeklyHours) {
-      const dayConfig = weeklyHours[dayOfWeek];
+    if (weeklyHours && hostWeekday in weeklyHours) {
+      const dayConfig = weeklyHours[hostWeekday];
       if (dayConfig === null || dayConfig === undefined) {
         // Day is disabled (e.g., weekends)
         return [];
@@ -291,12 +402,14 @@ export async function calculateAvailability(
       return [];
     }
 
-    const dayEnd = endOfDay(date);
+    // Build the full-day range in the host's timezone for fetching busy periods.
+    const dayStartUTC = wallClockToUTC(year, month, day, 0, 0, hostTimezone);
+    const dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000);
 
     // Fetch external calendar events and internal bookings in parallel.
     const [calendarEvents, existingBookings] = await Promise.all([
-      getCalendarEvents(userId, dayStart, dayEnd),
-      storage.getBookingsByDateRange(userId, dayStart, dayEnd),
+      getCalendarEvents(userId, dayStartUTC, dayEndUTC),
+      storage.getBookingsByDateRange(userId, dayStartUTC, dayEndUTC),
     ]);
 
     // Build a unified list of busy periods.
@@ -318,13 +431,14 @@ export async function calculateAvailability(
 
     const slots: TimeSlot[] = [];
 
-    // Generate candidate slots for each time block in the day
+    // Generate candidate slots for each time block in the day.
+    // Block times are interpreted in the host's timezone.
     for (const block of timeBlocks) {
       const [startHour, startMin] = block.start.split(":").map(Number);
       const [endHour, endMin] = block.end.split(":").map(Number);
 
-      const blockStart = setMinutes(setHours(dayStart, startHour), startMin);
-      const blockEnd = setMinutes(setHours(dayStart, endHour), endMin);
+      const blockStart = wallClockToUTC(year, month, day, startHour, startMin, hostTimezone);
+      const blockEnd = wallClockToUTC(year, month, day, endHour, endMin, hostTimezone);
 
       let cursor = blockStart;
 
@@ -339,13 +453,13 @@ export async function calculateAvailability(
 
         // Skip slots that are in the past.
         if (isBefore(slotStart, now)) {
-          cursor = addMinutes(cursor, SLOT_INTERVAL_MINUTES);
+          cursor = addMinutes(cursor, slotInterval);
           continue;
         }
 
         // Skip slots within minimum notice period
         if (isBefore(slotStart, minNoticeCutoff)) {
-          cursor = addMinutes(cursor, SLOT_INTERVAL_MINUTES);
+          cursor = addMinutes(cursor, slotInterval);
           continue;
         }
 
@@ -361,11 +475,12 @@ export async function calculateAvailability(
         });
 
         slots.push({
-          time: format(slotStart, "h:mm a"),
+          time: formatTimeInTimezone(slotStart, displayTimezone),
           available: !hasConflict,
+          utc: slotStart.toISOString(),
         });
 
-        cursor = addMinutes(cursor, SLOT_INTERVAL_MINUTES);
+        cursor = addMinutes(cursor, slotInterval);
       }
     }
 

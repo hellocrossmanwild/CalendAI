@@ -172,3 +172,11 @@ Subject: Meeting Prep: {Guest Name} - {Event Type} at {Time}
 - The brief scheduler is a simple in-process interval for MVP. For production, consider a proper job queue.
 - Document content extraction is non-trivial for PDFs/docx. For MVP, you can include just the file names and types, or use a simple PDF text extraction library.
 - Email delivery depends on F09 being complete. If not, generate and store briefs but skip email.
+
+---
+
+## Impact from F06 Implementation
+
+- **Timezone context (validated `guestTimezone`) is available on booking records.** F06 implemented `isValidTimezone()` and stores the validated IANA timezone on each booking. Meeting briefs can include the guest's local timezone for context (e.g., "Guest is in America/New_York — it will be 9:00 AM their time").
+- **UTC timestamps allow accurate time display in prep emails.** F06 added UTC ISO timestamps to availability responses and `startTimeUTC` to the booking endpoint. Brief generation and brief emails (R2) can use these UTC timestamps to render accurate meeting times in any timezone, avoiding ambiguity.
+- **Brief generation can reference the guest's local time.** With the validated `guestTimezone` and UTC booking times from F06, the AI prompt for `generateMeetingBrief()` can include the guest's local meeting time as context, helping the host prepare for timezone-aware conversations (e.g., "Note: This is an early morning call for your guest").
