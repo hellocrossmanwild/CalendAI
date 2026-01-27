@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import type { Booking, EventType } from "@shared/schema";
+import { LeadScoreBadge } from "@/components/lead-score-badge";
+import type { BookingWithDetails, EventType } from "@shared/schema";
 import { format, isToday, isTomorrow, parseISO } from "date-fns";
 
 export default function DashboardPage() {
-  const { data: bookings, isLoading: bookingsLoading } = useQuery<Booking[]>({
+  const { data: bookings, isLoading: bookingsLoading } = useQuery<BookingWithDetails[]>({
     queryKey: ["/api/bookings"],
   });
 
@@ -187,9 +188,16 @@ export default function DashboardPage() {
                       <p className="text-sm font-medium">
                         {formatBookingDate(booking.startTime)}
                       </p>
-                      <Badge variant="secondary" className="text-xs">
-                        {booking.status}
-                      </Badge>
+                      <div className="flex items-center justify-end gap-1.5 mt-1">
+                        <LeadScoreBadge
+                          score={booking.enrichment?.leadScore}
+                          label={booking.enrichment?.leadScoreLabel}
+                          size="sm"
+                        />
+                        <Badge variant="secondary" className="text-xs">
+                          {booking.status}
+                        </Badge>
+                      </div>
                     </div>
                   </Link>
                 ))}

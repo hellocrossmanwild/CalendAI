@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
-import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -9,6 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { LeadScoreBadge } from "@/components/lead-score-badge";
 import type { BookingWithDetails } from "@shared/schema";
 import { format, parseISO } from "date-fns";
 
@@ -198,6 +199,27 @@ export default function BookingDetailPage() {
                 <CardDescription>AI-powered research insights</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                {enrichment.leadScoreLabel && (
+                  <div>
+                    <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" />
+                      Lead Score
+                    </h4>
+                    <div className="flex items-center gap-3 mb-2">
+                      <LeadScoreBadge
+                        score={enrichment.leadScore}
+                        label={enrichment.leadScoreLabel}
+                        showScore={true}
+                      />
+                    </div>
+                    {enrichment.leadScoreReasoning && (
+                      <p className="text-sm text-muted-foreground">
+                        {enrichment.leadScoreReasoning}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {enrichment.companyInfo && (
                   <div>
                     <h4 className="text-sm font-medium mb-3 flex items-center gap-2">

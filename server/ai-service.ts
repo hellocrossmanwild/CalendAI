@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { calculateLeadScore, type LeadScoreResult } from "./lead-scoring";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -25,16 +26,35 @@ export interface LeadEnrichmentData {
 export async function enrichLead(
   name: string,
   email: string,
-  company?: string
+  company?: string,
+  prequalContext?: {
+    summary?: string;
+    keyPoints?: string[];
+    timeline?: string;
+    company?: string;
+  }
 ): Promise<LeadEnrichmentData> {
   const domain = email.split("@")[1];
-  
+
+  // If a company name was extracted during pre-qualification, prefer it
+  const effectiveCompany = company || prequalContext?.company;
+
+  const prequalSection = prequalContext
+    ? `
+Pre-qualification conversation context:
+${prequalContext.summary ? `Summary: ${prequalContext.summary}` : ""}
+${prequalContext.keyPoints?.length ? `Key discussion points: ${prequalContext.keyPoints.join("; ")}` : ""}
+${prequalContext.timeline ? `Timeline: ${prequalContext.timeline}` : ""}
+${prequalContext.company ? `Company (from conversation): ${prequalContext.company}` : ""}
+`
+    : "";
+
   const prompt = `You are a lead research assistant. Based on the following information, provide enriched data about this person and their company.
 
 Name: ${name}
 Email: ${email}
-${company ? `Company: ${company}` : `Email Domain: ${domain}`}
-
+${effectiveCompany ? `Company: ${effectiveCompany}` : `Email Domain: ${domain}`}
+${prequalSection}
 Please research and provide:
 1. Company information (industry, size estimate, description, any recent news)
 2. Personal information (likely role based on typical patterns, potential LinkedIn profile structure)
@@ -522,5 +542,64 @@ When you have enough information to create the event type:
       response: "I had trouble processing that. Could you try again?",
       complete: false,
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Lead Enrichment + Scoring Orchestrator (F08)
+// ---------------------------------------------------------------------------
+
+/**
+ * Enriches a lead using AI and then scores it deterministically.
+ * Returns both the enrichment data and the score, or null on failure.
+ * The caller (routes.ts in Phase 2) is responsible for persisting the results.
+ */
+export async function enrichAndScore(
+  bookingId: number,
+  name: string,
+  email: string,
+  company: string | undefined,
+  guestPhone: string | null | undefined,
+  notes: string | null,
+  prequalData: {
+    summary?: string;
+    keyPoints?: string[];
+    timeline?: string;
+    documents?: string[];
+    company?: string;
+  } | null,
+  documentCount: number
+): Promise<{ enrichment: LeadEnrichmentData; score: LeadScoreResult } | null> {
+  try {
+    // 1. AI-powered enrichment (with optional pre-qual context)
+    const prequalContext = prequalData
+      ? {
+          summary: prequalData.summary,
+          keyPoints: prequalData.keyPoints,
+          timeline: prequalData.timeline,
+          company: prequalData.company,
+        }
+      : undefined;
+
+    const enrichment = await enrichLead(name, email, company, prequalContext);
+
+    // 2. Deterministic scoring based on all available signals
+    const score = calculateLeadScore({
+      enrichmentData: {
+        companyInfo: enrichment.companyInfo,
+        personalInfo: enrichment.personalInfo,
+      },
+      bookingData: {
+        guestPhone: guestPhone ?? null,
+        notes,
+      },
+      prequalData,
+      documentCount,
+    });
+
+    return { enrichment, score };
+  } catch (error) {
+    console.error(`[enrichAndScore] Failed for booking ${bookingId}:`, error);
+    return null;
   }
 }

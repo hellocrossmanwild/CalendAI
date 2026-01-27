@@ -3,6 +3,7 @@
 **Priority:** High
 **Estimated Scope:** Medium
 **Dependencies:** None (but F09 needed for email delivery of enrichment alerts)
+**Status: ~90% COMPLETE** (R6 stretch goal deferred)
 
 ---
 
@@ -174,16 +175,16 @@ ALTER TABLE lead_enrichments ADD COLUMN lead_score_reasoning TEXT;
 
 ## Acceptance Criteria
 
-- [ ] Lead score is calculated using the PRD's points-based system
-- [ ] Score considers: role, company size, use case clarity, timeline, documents, phone, LinkedIn
-- [ ] Scores are classified as High (60+), Medium (30-59), Low (<30)
-- [ ] Enrichment triggers automatically on new booking creation
-- [ ] Lead score badge shown on booking cards, detail page, leads page, and dashboard
-- [ ] Score reasoning is shown on booking detail page
-- [ ] Leads page supports filtering by score level
-- [ ] Leads page supports sorting by score
-- [ ] Manual "Enrich Lead" button still works for re-enrichment
-- [ ] If auto-enrichment fails, booking still succeeds and manual enrichment is available
+- [x] Lead score is calculated using the PRD's points-based system
+- [x] Score considers: role, company size, use case clarity, timeline, documents, phone, LinkedIn
+- [x] Scores are classified as High (60+), Medium (30-59), Low (<30)
+- [x] Enrichment triggers automatically on new booking creation
+- [x] Lead score badge shown on booking cards, detail page, leads page, and dashboard
+- [x] Score reasoning is shown on booking detail page
+- [x] Leads page supports filtering by score level
+- [x] Leads page supports sorting by score
+- [x] Manual "Enrich Lead" button still works for re-enrichment
+- [x] If auto-enrichment fails, booking still succeeds and manual enrichment is available
 
 ---
 
@@ -192,3 +193,79 @@ ALTER TABLE lead_enrichments ADD COLUMN lead_score_reasoning TEXT;
 - The scoring logic should combine rule-based checks (document uploaded = +10, phone provided = +5) with AI-assisted analysis (role detection, use case clarity) for best results.
 - Auto-enrichment should be async and non-blocking — the booker should get their confirmation immediately.
 - Consider caching enrichment results by email domain to reduce AI calls for repeat visitors from the same company.
+
+---
+
+## Implementation Status (Phase 3b Complete)
+
+**Implemented:** January 27, 2026
+**Coverage:** ~90% (R1-R5 complete; R6 stretch goal deferred)
+
+### Implementation Summary
+
+F08 Phase 3b delivered a complete lead scoring and enrichment pipeline: a deterministic rule-based scoring engine, automatic fire-and-forget enrichment on booking creation, enhanced AI enrichment with pre-qualification context, a reusable score badge component, and score-based filtering and sorting on the leads page. Requirements R1 through R5 are fully implemented. R6 (Real Enrichment APIs) was explicitly deferred as a stretch/future goal.
+
+### Files Created
+
+| File | Purpose |
+|------|---------|
+| `server/lead-scoring.ts` | Deterministic rule-based scoring engine with `calculateLeadScore()` function |
+| `client/src/components/lead-score-badge.tsx` | Reusable color-coded score badge component (used across 4 pages) |
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `shared/schema.ts` | Added `leadScore` (integer), `leadScoreLabel` (text), `leadScoreReasoning` (text) columns to `lead_enrichments` table |
+| `server/ai-service.ts` | `enrichLead()` now accepts optional `prequalContext` parameter; new `enrichAndScore()` orchestrator function that combines enrichment + scoring |
+| `server/storage.ts` | New `updateLeadEnrichmentScore()` method for persisting score data after enrichment |
+| `server/routes.ts` | Auto-enrichment fire-and-forget IIFE in `POST /api/public/book`; manual `POST /api/bookings/:id/enrich` now calculates scores; both endpoints pass pre-qual context |
+| `client/src/pages/leads.tsx` | Score badges on lead rows, filter dropdown by score level (All/High/Medium/Low), sort dropdown (score/date/name) |
+| `client/src/pages/bookings.tsx` | Score badge displayed on booking cards |
+| `client/src/pages/booking-detail.tsx` | Score with reasoning displayed in enrichment card |
+| `client/src/pages/dashboard.tsx` | Score badge on upcoming meeting cards |
+
+### Architecture Decisions
+
+- **Scoring is deterministic (rule-based), not AI-assisted.** This ensures consistency and testability. The same enrichment data always produces the same score. The scoring factors and point values match the PRD specification exactly.
+- **Auto-enrichment uses a fire-and-forget IIFE after the response is sent.** The `POST /api/public/book` handler sends the booking confirmation response first, then triggers `enrichAndScore()` asynchronously. This is non-blocking -- the booker gets their confirmation immediately regardless of enrichment outcome.
+- **Pre-qual `extractedData` is fed to the GPT-4o enrichment prompt.** The `enrichLead()` function now accepts an optional `prequalContext` containing the summary, key points, timeline, and company name from F07's AI summary card. This gives the enrichment AI richer context for more accurate inference.
+- **Score reasoning is human-readable and lists contributing factors with point values.** Example: "Executive role (+20), Company size 51+ (+20), Clear use case (+15) = 55 (Medium)". This makes scores transparent and debuggable.
+- **`LeadScoreBadge` is a shared component used across 4 pages.** A single reusable component (`lead-score-badge.tsx`) renders the color-coded badge (green/yellow/red) on the leads page, bookings page, booking detail page, and dashboard. This ensures visual consistency.
+
+### Scoring Factors
+
+| Factor | Points |
+|--------|--------|
+| Executive role (Founder/CEO/Director) | +20 |
+| Company size 11-50 | +15 |
+| Company size 51+ | +20 |
+| Clear use case in message | +15 |
+| Urgent timeline ("soon"/"next month") | +15 |
+| Document uploaded | +10 |
+| Phone number provided | +5 |
+| LinkedIn profile found | +10 |
+
+**Thresholds:** High (60+), Medium (30-59), Low (<30)
+
+### Database Changes
+
+Three new columns added to the `lead_enrichments` table:
+
+```sql
+ALTER TABLE lead_enrichments ADD COLUMN lead_score INTEGER;
+ALTER TABLE lead_enrichments ADD COLUMN lead_score_label TEXT;
+ALTER TABLE lead_enrichments ADD COLUMN lead_score_reasoning TEXT;
+```
+
+### What Was Deferred
+
+- **R6: Real Enrichment APIs** — Clearbit, Apollo, Hunter.io, and LinkedIn API integrations were explicitly noted as future/stretch goals in the brief. The current AI-inference approach is the MVP strategy. Real API integrations would be post-MVP paid integrations.
+- **Domain-level caching of enrichment results** — Noted in the brief as a future optimization to reduce redundant AI calls for repeat visitors from the same company domain. Not implemented in this phase.
+
+### Dependencies & Implications for Other Features
+
+- **F09 (Email Notifications):** Lead scores are now available on enrichment records. Host notification emails (R2) can include `enrichment.leadScoreLabel` and `enrichment.leadScore` for rendering score badges. Auto-enrichment is async, so the score may or may not be ready by the time the notification email is composed.
+- **F10 (Dashboard Enhancements):** F08 dependency is now SATISFIED. Score badges are displayed on booking cards and dashboard. Score-based filtering and sorting is implemented on the leads page. R5 (Enhanced Dashboard Metrics) can now include lead score distribution charts since score data is available.
+- **F11 (Meeting Prep Brief):** Lead scores are available via `enrichment.leadScore`, `enrichment.leadScoreLabel`, and `enrichment.leadScoreReasoning`. The `generateMeetingBrief()` AI prompt already receives enrichment data, and with F08's enhanced enrichment (which now includes pre-qual context), briefs will be richer. Brief emails (R2) can include the lead score for quick host context.
+- **F02 (Calendar Connection):** Calendar event descriptions could be enhanced to include the lead score, though this requires the enrichment to complete before/during calendar event creation (currently enrichment runs after the response is sent).

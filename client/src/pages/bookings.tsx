@@ -32,7 +32,8 @@ import {
 } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { Booking } from "@shared/schema";
+import { LeadScoreBadge } from "@/components/lead-score-badge";
+import type { BookingWithDetails } from "@shared/schema";
 import { format, isPast, isToday, isTomorrow, parseISO } from "date-fns";
 
 export default function BookingsPage() {
@@ -41,7 +42,7 @@ export default function BookingsPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [tab, setTab] = useState("upcoming");
 
-  const { data: bookings, isLoading } = useQuery<Booking[]>({
+  const { data: bookings, isLoading } = useQuery<BookingWithDetails[]>({
     queryKey: ["/api/bookings"],
   });
 
@@ -77,7 +78,7 @@ export default function BookingsPage() {
     return format(date, "MMM d, yyyy 'at' h:mm a");
   };
 
-  const getStatusBadge = (booking: Booking) => {
+  const getStatusBadge = (booking: BookingWithDetails) => {
     const startDate = new Date(booking.startTime);
     if (booking.status === "cancelled") {
       return <Badge variant="destructive">Cancelled</Badge>;
@@ -192,6 +193,13 @@ export default function BookingsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        {booking.enrichment?.leadScoreLabel && (
+                          <LeadScoreBadge
+                            score={booking.enrichment.leadScore}
+                            label={booking.enrichment.leadScoreLabel}
+                            size="sm"
+                          />
+                        )}
                         {getStatusBadge(booking)}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>

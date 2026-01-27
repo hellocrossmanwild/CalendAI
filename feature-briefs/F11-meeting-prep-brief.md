@@ -2,7 +2,7 @@
 
 **Priority:** Medium
 **Estimated Scope:** Small-Medium
-**Dependencies:** F08 (for enrichment data in briefs), F09 (for email delivery)
+**Dependencies:** F08 (for enrichment data in briefs) — **SATISFIED**, F09 (for email delivery)
 
 ---
 
@@ -180,3 +180,10 @@ Subject: Meeting Prep: {Guest Name} - {Event Type} at {Time}
 - **Timezone context (validated `guestTimezone`) is available on booking records.** F06 implemented `isValidTimezone()` and stores the validated IANA timezone on each booking. Meeting briefs can include the guest's local timezone for context (e.g., "Guest is in America/New_York — it will be 9:00 AM their time").
 - **UTC timestamps allow accurate time display in prep emails.** F06 added UTC ISO timestamps to availability responses and `startTimeUTC` to the booking endpoint. Brief generation and brief emails (R2) can use these UTC timestamps to render accurate meeting times in any timezone, avoiding ambiguity.
 - **Brief generation can reference the guest's local time.** With the validated `guestTimezone` and UTC booking times from F06, the AI prompt for `generateMeetingBrief()` can include the guest's local meeting time as context, helping the host prepare for timezone-aware conversations (e.g., "Note: This is an early morning call for your guest").
+
+### Impact from F08 Implementation
+
+- **Lead scores are now available for inclusion in meeting briefs.** F08 added `enrichment.leadScore` (integer), `enrichment.leadScoreLabel` ("High"/"Medium"/"Low"), and `enrichment.leadScoreReasoning` (human-readable factor breakdown with point values) to the `lead_enrichments` table. The `generateMeetingBrief()` AI prompt in `server/ai-service.ts` already receives enrichment data, so it can now incorporate the lead score and reasoning as additional context for generating more targeted talking points.
+- **Enhanced enrichment data provides richer brief context.** F08's `enrichLead()` function now accepts an optional `prequalContext` containing the summary, key points, timeline, and company name from F07's AI summary card. This means the enrichment data passed to `generateMeetingBrief()` is richer than before -- the AI has more context about the guest's needs, timeline, and company, resulting in more relevant and actionable meeting briefs.
+- **Brief emails (R2) can include the lead score for quick host context.** When F09 email delivery is implemented and F11's R2 (Email Delivery of Briefs) is built, the brief email template can include the lead score label and numeric score at the top of the email (e.g., "Lead Score: High (75)"). This gives the host an immediate sense of lead quality before reading the full brief.
+- **F08 dependency is now SATISFIED.** F11 listed F08 as a dependency for enrichment data in briefs. With F08 complete, the enrichment pipeline includes scoring, enhanced AI inference with pre-qual context, and auto-enrichment on booking creation -- all of which feed into richer meeting prep briefs.
