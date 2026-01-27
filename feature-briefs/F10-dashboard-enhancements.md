@@ -2,7 +2,7 @@
 
 **Priority:** Medium
 **Estimated Scope:** Small-Medium
-**Dependencies:** F08 (for lead score display), F12 (for reschedule functionality)
+**Dependencies:** F08 (for lead score display) — **SATISFIED**, F12 (for reschedule functionality)
 
 ---
 
@@ -28,8 +28,8 @@ The dashboard and booking management have basic functionality:
 2. **Date range filter** — no filter by date range
 3. **Event type filter** — no filter by event type
 4. **Reschedule from dashboard** — no reschedule capability (F12 dependency)
-5. **Lead score on booking cards** — not displayed (F08 dependency)
-6. **Sorting options** — can't sort by date, name, or score
+5. ~~**Lead score on booking cards** — not displayed (F08 dependency)~~ **DONE (F08)** — score badges on booking cards, leads page, booking detail, and dashboard
+6. **Sorting options** — can't sort by date, name, or score on bookings page (note: leads page now has sorting via F08)
 7. **Booking status management** — only cancel; no mark as completed, no-show tracking
 
 ---
@@ -131,3 +131,12 @@ On booking cards, add:
 - The calendar month view is the biggest UI piece. Consider whether to use `react-day-picker` (already installed) or a dedicated calendar component.
 - Recharts is already installed for charts on the dashboard.
 - Lead score display depends on F08 being complete; design the UI to gracefully handle missing scores.
+
+---
+
+### Impact from F08 Implementation
+
+- **F08 dependency is now SATISFIED.** F10 listed F08 as a dependency for lead score display. F08 has implemented lead scores with a deterministic rule-based scoring engine (`server/lead-scoring.ts`), and score badges are already displayed on booking cards (`client/src/pages/bookings.tsx`) and the dashboard (`client/src/pages/dashboard.tsx`).
+- **Score-based filtering and sorting is implemented on the leads page.** F08 added a filter dropdown (All/High/Medium/Low) and a sort dropdown (score/date/name) to `client/src/pages/leads.tsx`. F10's R3 (Sorting Options) can build on this pattern for the bookings page, and the "Lead Score (High-Low)" / "Lead Score (Low-High)" sort options are already feasible since score data is available on enrichment records.
+- **Dashboard shows score badges on upcoming meetings.** F08 added `LeadScoreBadge` components to the upcoming meetings list on the dashboard. F10's R5 (Enhanced Dashboard Metrics) can now include lead score distribution charts (e.g., pie/bar chart showing High/Medium/Low breakdown) since `enrichment.leadScore` and `enrichment.leadScoreLabel` data is available for all enriched bookings.
+- **R5 lead score breakdown chart is now feasible.** The brief specifically calls for "Lead score breakdown: pie/bar chart showing High/Medium/Low distribution (requires F08)." With F08 complete, this chart can query enrichment records and aggregate by `leadScoreLabel` to render the distribution using the already-installed Recharts library.

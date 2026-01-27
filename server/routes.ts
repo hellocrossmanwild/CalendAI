@@ -2,7 +2,8 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertEventTypeSchema, insertBookingSchema, phoneRegex } from "@shared/schema";
-import { enrichLead, generateMeetingBrief, processPrequalChat, processEventTypeCreation } from "./ai-service";
+import { enrichLead, enrichAndScore, generateMeetingBrief, processPrequalChat, processEventTypeCreation } from "./ai-service";
+import { calculateLeadScore } from "./lead-scoring";
 import { scanWebsite } from "./website-scanner";
 import { getGoogleAuthUrl, exchangeCodeForTokens, calculateAvailability, createCalendarEvent, deleteCalendarEvent, listUserCalendars, isValidTimezone } from "./calendar-service";
 import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
@@ -571,10 +572,25 @@ export async function registerRoutes(
         return res.json(existing);
       }
 
+      // Fetch pre-qual and document data for enrichment context and scoring
+      const prequalResponse = await storage.getPrequalResponse(booking.id);
+      const extractedData = prequalResponse?.extractedData as Record<string, any> | null;
+      const docs = await storage.getDocuments(booking.id);
+      const documentCount = docs?.length || 0;
+
+      const prequalData = extractedData ? {
+        summary: extractedData.summary as string | undefined,
+        keyPoints: extractedData.keyPoints as string[] | undefined,
+        timeline: extractedData.timeline as string | undefined,
+        documents: extractedData.documents as string[] | undefined,
+        company: extractedData.company as string | undefined,
+      } : null;
+
       const enrichmentData = await enrichLead(
         booking.guestName,
         booking.guestEmail,
-        booking.guestCompany || undefined
+        booking.guestCompany || undefined,
+        prequalData ? { summary: prequalData.summary, keyPoints: prequalData.keyPoints, timeline: prequalData.timeline, company: prequalData.company } : undefined
       );
 
       const enrichment = await storage.createLeadEnrichment({
@@ -583,7 +599,29 @@ export async function registerRoutes(
         personalInfo: enrichmentData.personalInfo,
       });
 
-      res.json(enrichment);
+      // After creating enrichment, calculate and store score
+      const scoreResult = calculateLeadScore({
+        enrichmentData: {
+          companyInfo: enrichmentData.companyInfo,
+          personalInfo: enrichmentData.personalInfo,
+        },
+        bookingData: {
+          guestPhone: booking.guestPhone,
+          notes: booking.notes,
+        },
+        prequalData,
+        documentCount,
+      });
+
+      await storage.updateLeadEnrichmentScore(
+        enrichment.id,
+        scoreResult.score,
+        scoreResult.label,
+        scoreResult.reasoning
+      );
+
+      // Return enrichment with score
+      res.json({ ...enrichment, leadScore: scoreResult.score, leadScoreLabel: scoreResult.label, leadScoreReasoning: scoreResult.reasoning });
     } catch (error) {
       console.error("Error enriching lead:", error);
       res.status(500).json({ error: "Failed to enrich lead" });
@@ -1047,6 +1085,58 @@ export async function registerRoutes(
       }
 
       res.status(201).json({ ...booking, calendarEventId: calendarEventId || booking.calendarEventId });
+
+      // Fire-and-forget: auto-enrich and score the new booking
+      (async () => {
+        try {
+          // Get prequal data if it was stored
+          const prequalResponse = await storage.getPrequalResponse(booking.id);
+          const extractedData = prequalResponse?.extractedData as Record<string, any> | null;
+
+          // Count documents for this booking
+          const docs = await storage.getDocuments(booking.id);
+          const documentCount = docs?.length || 0;
+
+          // Build prequal context from extracted data
+          const prequalData = extractedData ? {
+            summary: extractedData.summary as string | undefined,
+            keyPoints: extractedData.keyPoints as string[] | undefined,
+            timeline: extractedData.timeline as string | undefined,
+            documents: extractedData.documents as string[] | undefined,
+            company: extractedData.company as string | undefined,
+          } : null;
+
+          const result = await enrichAndScore(
+            booking.id,
+            booking.guestName,
+            booking.guestEmail,
+            booking.guestCompany || undefined,
+            booking.guestPhone,
+            booking.notes,
+            prequalData,
+            documentCount
+          );
+
+          if (result) {
+            // Persist enrichment
+            const enrichment = await storage.createLeadEnrichment({
+              bookingId: booking.id,
+              companyInfo: result.enrichment.companyInfo,
+              personalInfo: result.enrichment.personalInfo,
+            });
+
+            // Persist score
+            await storage.updateLeadEnrichmentScore(
+              enrichment.id,
+              result.score.score,
+              result.score.label,
+              result.score.reasoning
+            );
+          }
+        } catch (err) {
+          console.error("Auto-enrichment failed for booking", booking.id, err);
+        }
+      })();
     } catch (error) {
       console.error("Error creating booking:", error);
       res.status(400).json({ error: "Failed to create booking" });

@@ -74,6 +74,7 @@ export interface IStorage {
   getLeadEnrichment(bookingId: number): Promise<LeadEnrichment | undefined>;
   createLeadEnrichment(data: InsertLeadEnrichment): Promise<LeadEnrichment>;
   updateLeadEnrichment(id: number, data: Partial<InsertLeadEnrichment>): Promise<LeadEnrichment | undefined>;
+  updateLeadEnrichmentScore(id: number, score: number, label: string, reasoning: string): Promise<LeadEnrichment | undefined>;
 
   getPrequalResponse(bookingId: number): Promise<PrequalResponse | undefined>;
   createPrequalResponse(data: InsertPrequalResponse): Promise<PrequalResponse>;
@@ -285,6 +286,19 @@ export class DatabaseStorage implements IStorage {
 
   async updateLeadEnrichment(id: number, data: Partial<InsertLeadEnrichment>): Promise<LeadEnrichment | undefined> {
     const [enrichment] = await db.update(leadEnrichments).set(data).where(eq(leadEnrichments.id, id)).returning();
+    return enrichment;
+  }
+
+  async updateLeadEnrichmentScore(id: number, score: number, label: string, reasoning: string): Promise<LeadEnrichment | undefined> {
+    const [enrichment] = await db
+      .update(leadEnrichments)
+      .set({
+        leadScore: score,
+        leadScoreLabel: label,
+        leadScoreReasoning: reasoning,
+      })
+      .where(eq(leadEnrichments.id, id))
+      .returning();
     return enrichment;
   }
 

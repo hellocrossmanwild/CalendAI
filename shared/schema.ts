@@ -63,6 +63,9 @@ export const leadEnrichments = pgTable("lead_enrichments", {
     bio?: string;
     interests?: string[];
   }>(),
+  leadScore: integer("lead_score"),
+  leadScoreLabel: text("lead_score_label"),  // "High", "Medium", "Low"
+  leadScoreReasoning: text("lead_score_reasoning"),
   enrichedAt: timestamp("enriched_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

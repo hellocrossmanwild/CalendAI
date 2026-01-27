@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, Users, Building, Mail, ExternalLink, Sparkles, Calendar } from "lucide-react";
 import { Link } from "wouter";
@@ -8,24 +8,71 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { LeadScoreBadge } from "@/components/lead-score-badge";
 import type { BookingWithDetails } from "@shared/schema";
 import { format, parseISO } from "date-fns";
 
 export default function LeadsPage() {
   const [search, setSearch] = useState("");
+  const [scoreFilter, setScoreFilter] = useState("all");
+  const [sortOption, setSortOption] = useState("score-desc");
 
   const { data: bookings, isLoading } = useQuery<BookingWithDetails[]>({
     queryKey: ["/api/bookings"],
   });
 
-  const filteredBookings = bookings?.filter((b) => {
-    const matchesSearch =
-      b.guestName.toLowerCase().includes(search.toLowerCase()) ||
-      b.guestEmail.toLowerCase().includes(search.toLowerCase()) ||
-      b.guestCompany?.toLowerCase().includes(search.toLowerCase()) ||
-      b.enrichment?.companyInfo?.industry?.toLowerCase().includes(search.toLowerCase());
-    return matchesSearch;
-  }) || [];
+  const filteredBookings = useMemo(() => {
+    let results = bookings?.filter((b) => {
+      const matchesSearch =
+        b.guestName.toLowerCase().includes(search.toLowerCase()) ||
+        b.guestEmail.toLowerCase().includes(search.toLowerCase()) ||
+        b.guestCompany?.toLowerCase().includes(search.toLowerCase()) ||
+        b.enrichment?.companyInfo?.industry?.toLowerCase().includes(search.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      // Score filter
+      if (scoreFilter === "all") return true;
+      if (scoreFilter === "not-scored") return !b.enrichment?.leadScoreLabel;
+      return b.enrichment?.leadScoreLabel === scoreFilter;
+    }) || [];
+
+    // Sort
+    results.sort((a, b) => {
+      const scoreA = a.enrichment?.leadScore ?? -1;
+      const scoreB = b.enrichment?.leadScore ?? -1;
+
+      switch (sortOption) {
+        case "score-desc":
+          if (scoreA === -1 && scoreB === -1) return 0;
+          if (scoreA === -1) return 1;
+          if (scoreB === -1) return -1;
+          return scoreB - scoreA;
+        case "score-asc":
+          if (scoreA === -1 && scoreB === -1) return 0;
+          if (scoreA === -1) return 1;
+          if (scoreB === -1) return -1;
+          return scoreA - scoreB;
+        case "date-desc":
+          return new Date(b.startTime).getTime() - new Date(a.startTime).getTime();
+        case "date-asc":
+          return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
+        case "name-asc":
+          return a.guestName.localeCompare(b.guestName);
+        default:
+          return 0;
+      }
+    });
+
+    return results;
+  }, [bookings, search, scoreFilter, sortOption]);
 
   const getInitials = (name: string) => {
     return name
@@ -45,15 +92,41 @@ export default function LeadsPage() {
         </div>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search leads..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
-          data-testid="input-search"
-        />
+      <div className="flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search leads..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+            data-testid="input-search"
+          />
+        </div>
+        <Select value={scoreFilter} onValueChange={setScoreFilter}>
+          <SelectTrigger className="w-[160px]" data-testid="select-score-filter">
+            <SelectValue placeholder="All Scores" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Scores</SelectItem>
+            <SelectItem value="High">High</SelectItem>
+            <SelectItem value="Medium">Medium</SelectItem>
+            <SelectItem value="Low">Low</SelectItem>
+            <SelectItem value="not-scored">Not Scored</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={sortOption} onValueChange={setSortOption}>
+          <SelectTrigger className="w-[200px]" data-testid="select-sort">
+            <SelectValue placeholder="Sort by..." />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="score-desc">Score (High to Low)</SelectItem>
+            <SelectItem value="score-asc">Score (Low to High)</SelectItem>
+            <SelectItem value="date-desc">Date (Newest)</SelectItem>
+            <SelectItem value="date-asc">Date (Oldest)</SelectItem>
+            <SelectItem value="name-asc">Name (A-Z)</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (
@@ -103,7 +176,7 @@ export default function LeadsPage() {
                         {booking.enrichment.personalInfo.role}
                       </p>
                     )}
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                       {booking.enrichment ? (
                         <Badge variant="secondary" className="text-xs">
                           <Sparkles className="h-3 w-3 mr-1" />
@@ -112,6 +185,11 @@ export default function LeadsPage() {
                       ) : (
                         <Badge variant="outline" className="text-xs">Not Enriched</Badge>
                       )}
+                      <LeadScoreBadge
+                        score={booking.enrichment?.leadScore}
+                        label={booking.enrichment?.leadScoreLabel}
+                        size="sm"
+                      />
                     </div>
                   </div>
                 </div>

@@ -3,15 +3,15 @@
 **Date:** January 27, 2026
 **Auditor:** Claude (automated audit)
 **Scope:** Full feature-by-feature comparison of the CalendAI codebase against the v1.0 PRD
-**Last Updated:** Post-F07 implementation
+**Last Updated:** Post-F08 implementation
 
 ---
 
 ## Executive Summary
 
-The CalendAI codebase has matured significantly through seven feature implementation cycles (F01–F07). Core authentication, Google Calendar integration, AI-assisted availability setup, AI-assisted event type creation, booking page enhancements, date/time selection improvements, and conversational pre-qualification enhancements are now implemented. The booking flow works end-to-end with real calendar integration, AI-powered pre-qualification with document upload and summary cards, lead enrichment, meeting briefs, and AI-guided event type creation with website scanning and branding extraction.
+The CalendAI codebase has matured significantly through eight feature implementation cycles (F01–F08). Core authentication, Google Calendar integration, AI-assisted availability setup, AI-assisted event type creation, booking page enhancements, date/time selection improvements, conversational pre-qualification enhancements, and lead enrichment with scoring are now implemented. The booking flow works end-to-end with real calendar integration, AI-powered pre-qualification with document upload and summary cards, automatic lead enrichment and scoring, meeting briefs, and AI-guided event type creation with website scanning and branding extraction.
 
-**Overall PRD Coverage: ~75%** of MVP requirements are implemented.
+**Overall PRD Coverage: ~79%** of MVP requirements are implemented.
 
 **Key Achievements Since Last Audit:**
 - Full email-based authentication with Google OAuth, magic links, and password reset (F01)
@@ -21,7 +21,8 @@ The CalendAI codebase has matured significantly through seven feature implementa
 - Booking page enhancements with full branding, host info, SEO meta tags, and responsive design (F05)
 - Date and time selection improvements with guest timezone detection, UTC-based booking, and enhanced calendar UI (F06)
 - Conversational pre-qualification enhancements: phone field, document upload in chat, AI summary card, host name personalization, custom question fallback, client-side email validation (F07)
-- Testing infrastructure expanded (Vitest with 137 backend tests)
+- Lead enrichment and scoring: deterministic rule-based scoring engine, auto-enrichment on booking creation, pre-qual context in enrichment, score badges across UI, filter/sort by score (F08)
+- Testing infrastructure expanded (Vitest with 137+ backend tests)
 
 ---
 
@@ -138,14 +139,20 @@ The CalendAI codebase has matured significantly through seven feature implementa
 
 ---
 
-### F8: Lead Enrichment — ~40% Partial
+### F8: Lead Enrichment & Scoring — ~90% Complete ✅
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Trigger on email capture | MISSING | Manual only (host clicks button) |
-| Fetch company information | IMPLEMENTED | AI inference from email domain |
-| Lead scoring | MISSING | No scoring system |
-| Store enrichment data | IMPLEMENTED | `lead_enrichments` table |
+| R1: Lead scoring system | IMPLEMENTED | Deterministic rule-based scoring engine in `server/lead-scoring.ts` with PRD-defined factors and thresholds |
+| R2: Auto-enrichment on booking | IMPLEMENTED | Fire-and-forget IIFE in `POST /api/public/book` — non-blocking, error-safe |
+| R3: Lead score display | IMPLEMENTED | Color-coded badges (green/yellow/red) on leads page, bookings page, booking detail, and dashboard |
+| R4: Score-based filtering/sorting | IMPLEMENTED | Filter by score level (All/High/Medium/Low) and sort by score/date/name on leads page |
+| R5: Enhanced AI enrichment prompt | IMPLEMENTED | Pre-qual `extractedData` (summary, key points, timeline, company) fed to GPT-4o enrichment prompt |
+| R6: Real enrichment APIs | DEFERRED | Stretch goal — Clearbit/Apollo/Hunter.io integrations deferred to post-MVP |
+| Fetch company information | IMPLEMENTED | AI inference from email domain with pre-qual context |
+| Store enrichment data | IMPLEMENTED | `lead_enrichments` table with score fields (`leadScore`, `leadScoreLabel`, `leadScoreReasoning`) |
+
+**Remaining Gap:** R6 (Real Enrichment APIs) — stretch goal, deferred to post-MVP. Domain-level caching noted as future optimization.
 
 ---
 
@@ -208,7 +215,7 @@ The CalendAI codebase has matured significantly through seven feature implementa
 | User | `users` | PARTIAL | Missing: `timezone`, `companyName`, `websiteUrl` |
 | Event Type | `event_types` | **COMPLETE** | All fields implemented including `location`, `logo`, `primaryColor`, `secondaryColor`, `questions` |
 | Booking | `bookings` | PARTIAL | `guestPhone` implemented (F07). Missing: `rescheduleToken`, `cancelToken` |
-| Lead Enrichment | `lead_enrichments` | PARTIAL | Missing: `leadScore`, `leadScoreLabel`, `leadScoreReasoning` |
+| Lead Enrichment | `lead_enrichments` | **COMPLETE** | All fields implemented including `leadScore`, `leadScoreLabel`, `leadScoreReasoning` (added in F08) |
 | Availability Rules | `availability_rules` | COMPLETE | Full multi-block weekly hours |
 | Calendar Token | `calendar_tokens` | COMPLETE | Real OAuth with refresh tokens |
 | Pre-qual Response | `prequal_responses` | COMPLETE | Chat history + extracted data |
@@ -228,7 +235,7 @@ The CalendAI codebase has matured significantly through seven feature implementa
 | **F5:** Booking Page Generation | MVP | Partial | ~55% |
 | **F6:** Date & Time Selection | MVP | Mostly Complete | ~85% |
 | **F7:** Conversational Pre-Qual | MVP | Complete | ~90% |
-| **F8:** Lead Enrichment | MVP | Partial | ~40% |
+| **F8:** Lead Enrichment & Scoring | MVP | Complete | ~90% |
 | **F9:** Email Notifications | MVP | Stubbed | ~5% |
 | **F10:** Booking Dashboard | MVP | Partial | ~55% |
 | **F11:** Meeting Prep Brief | MVP | Partial | ~45% |
@@ -243,9 +250,9 @@ The CalendAI codebase has matured significantly through seven feature implementa
 
 2. **No reschedule/cancel for bookers** — Bookers receive no links to manage their booking. Only hosts can cancel.
 
-3. **No lead scoring** — The PRD defines a detailed points-based scoring system. The leads page shows no scores. F07 now provides `guestPhone` and document upload data that F08 can use for scoring.
+3. ~~**No lead scoring** — The PRD defines a detailed points-based scoring system. The leads page shows no scores.~~ **RESOLVED by F08** — Deterministic rule-based scoring engine implemented with PRD-defined factors. Score badges displayed across all relevant pages. Filter and sort by score on leads page.
 
-4. **No auto-enrichment on booking** — Lead enrichment is still manual (host clicks button).
+4. ~~**No auto-enrichment on booking** — Lead enrichment is still manual (host clicks button).~~ **RESOLVED by F08** — Fire-and-forget auto-enrichment triggers on every new booking in `POST /api/public/book`. Manual enrichment button still available as fallback.
 
 5. **Embeddable widget missing** — No `widget.js` for embedding booking on external sites.
 
@@ -256,7 +263,7 @@ The CalendAI codebase has matured significantly through seven feature implementa
 | Component | Status |
 |---|---|
 | Test framework | Vitest (configured in `vitest.config.ts`) |
-| Backend tests | 137 tests across multiple suites (website-scanner, ai-service, F05 booking page, F06 date/time, F07 prequal enhancements — phone validation, AI service, Zod schema, summary structure) |
+| Backend tests | 137+ tests across multiple suites (website-scanner, ai-service, F05 booking page, F06 date/time, F07 prequal enhancements, F08 lead scoring) |
 | Frontend tests | Not yet implemented |
 | CI/CD integration | Not configured |
 | Coverage reporting | `@vitest/coverage-v8` installed, not yet in CI |
