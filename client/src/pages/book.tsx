@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute } from "wouter";
 import { Calendar, Clock, ChevronLeft, ChevronRight, Loader2, CheckCircle, ArrowLeft, Send, Upload, X, Paperclip, CalendarPlus, ExternalLink, User, Mail, Globe, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import type { ICSEventParams } from "@/lib/ics";
 interface TimeSlot {
   time: string;
   available: boolean;
+  utc: string;
 }
 
 interface ChatMessage {
@@ -108,10 +109,12 @@ function getTimezoneLabel(tz: string): string {
 export default function BookPage() {
   const [, params] = useRoute("/book/:slug");
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [step, setStep] = useState<BookingStep>("calendar");
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [selectedTimeUTC, setSelectedTimeUTC] = useState<string | null>(null);
   const [weekStart, setWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
   const [formData, setFormData] = useState({
     name: "",
@@ -261,6 +264,7 @@ export default function BookPage() {
       eventTypeSlug: string;
       date: string;
       time: string;
+      startTimeUTC?: string;
       name: string;
       email: string;
       company?: string;
@@ -286,7 +290,24 @@ export default function BookPage() {
       });
     },
     onError: (error: Error) => {
-      toast({ title: "Booking failed", description: error.message, variant: "destructive" });
+      const is409 = error.message.startsWith("409");
+      if (is409) {
+        // Conflict: slot was booked by someone else. Re-fetch availability
+        // and send the booker back to the time selection step.
+        toast({
+          title: "Time slot no longer available",
+          description: "This slot was just booked. Please select another time.",
+          variant: "destructive",
+        });
+        setSelectedTime(null);
+        setSelectedTimeUTC(null);
+        setStep("time");
+        queryClient.invalidateQueries({
+          queryKey: ["/api/public/availability", params?.slug],
+        });
+      } else {
+        toast({ title: "Booking failed", description: error.message, variant: "destructive" });
+      }
     },
   });
 
@@ -327,8 +348,9 @@ export default function BookPage() {
     setStep("time");
   };
 
-  const handleTimeSelect = (time: string) => {
+  const handleTimeSelect = (time: string, utc: string) => {
     setSelectedTime(time);
+    setSelectedTimeUTC(utc);
     setStep("info");
   };
 
@@ -360,6 +382,7 @@ export default function BookPage() {
       eventTypeSlug: params.slug,
       date: selectedDate.toISOString(),
       time: selectedTime,
+      startTimeUTC: selectedTimeUTC || undefined,
       name: formData.name,
       email: formData.email,
       company: formData.company,
@@ -458,15 +481,7 @@ export default function BookPage() {
   }
 
   if (step === "confirm") {
-    const buildStartTime = (): Date | null => {
-      if (!selectedDate || !selectedTime) return null;
-      const [hours, minutes] = selectedTime.split(":").map(Number);
-      const dt = new Date(selectedDate);
-      dt.setHours(hours, minutes, 0, 0);
-      return dt;
-    };
-
-    const confirmStartTime = buildStartTime();
+    const confirmStartTime = selectedTimeUTC ? new Date(selectedTimeUTC) : null;
 
     const icsParams: ICSEventParams | null = confirmStartTime
       ? {
@@ -793,9 +808,9 @@ export default function BookPage() {
                     .filter((slot) => slot.available)
                     .map((slot) => (
                       <Button
-                        key={slot.time}
+                        key={slot.utc || slot.time}
                         variant={selectedTime === slot.time ? "default" : "outline"}
-                        onClick={() => handleTimeSelect(slot.time)}
+                        onClick={() => handleTimeSelect(slot.time, slot.utc)}
                         style={selectedTime === slot.time ? { backgroundColor: brandPrimary, borderColor: brandPrimary } : undefined}
                         data-testid={`button-time-${slot.time.replace(":", "")}`}
                       >

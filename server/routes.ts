@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { insertEventTypeSchema, insertBookingSchema } from "@shared/schema";
 import { enrichLead, generateMeetingBrief, processPrequalChat, processEventTypeCreation } from "./ai-service";
 import { scanWebsite } from "./website-scanner";
-import { getGoogleAuthUrl, exchangeCodeForTokens, calculateAvailability, createCalendarEvent, deleteCalendarEvent, listUserCalendars } from "./calendar-service";
+import { getGoogleAuthUrl, exchangeCodeForTokens, calculateAvailability, createCalendarEvent, deleteCalendarEvent, listUserCalendars, isValidTimezone } from "./calendar-service";
 import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
 import { addMinutes } from "date-fns";
 import bcrypt from "bcrypt";
@@ -915,10 +915,17 @@ export async function registerRoutes(
 
       const dateStr = req.query.date as string;
       const date = dateStr ? new Date(dateStr) : new Date();
-      // Accept guest timezone for future timezone-aware slot rendering
-      const _guestTimezone = (req.query.timezone as string) || "UTC";
+      if (isNaN(date.getTime())) {
+        return res.status(400).json({ error: "Invalid date parameter" });
+      }
 
-      const slots = await calculateAvailability(eventType.userId, eventType.id, date);
+      // Validate and pass guest timezone for timezone-aware slot rendering.
+      const guestTimezone = req.query.timezone as string | undefined;
+      if (guestTimezone && !isValidTimezone(guestTimezone)) {
+        return res.status(400).json({ error: "Invalid timezone identifier" });
+      }
+
+      const slots = await calculateAvailability(eventType.userId, eventType.id, date, guestTimezone);
       res.json(slots);
     } catch (error) {
       console.error("Error fetching availability:", error);
@@ -928,20 +935,40 @@ export async function registerRoutes(
 
   app.post("/api/public/book", async (req, res) => {
     try {
-      const { eventTypeSlug, date, time, name, email, company, notes, timezone: clientTimezone, chatHistory, documents } = req.body;
+      const { eventTypeSlug, date, time, name, email, company, notes, timezone: clientTimezone, startTimeUTC, chatHistory, documents } = req.body;
 
       const eventType = await storage.getEventTypeBySlug(eventTypeSlug);
       if (!eventType || !eventType.isActive) {
         return res.status(404).json({ error: "Event type not found" });
       }
 
-      // Parse date and time
-      const [hours, minutes] = time.replace(/ [AP]M/, "").split(":").map(Number);
-      const isPM = time.includes("PM");
-      const adjustedHours = isPM && hours !== 12 ? hours + 12 : (hours === 12 && !isPM ? 0 : hours);
-      
-      const startTime = new Date(date);
-      startTime.setHours(adjustedHours, minutes, 0, 0);
+      // Prefer the precise UTC timestamp from the availability API when
+      // available; fall back to the legacy date + display-time parsing.
+      let startTime: Date;
+      if (startTimeUTC) {
+        startTime = new Date(startTimeUTC);
+      } else {
+        const [hours, minutes] = time.replace(/ [AP]M/, "").split(":").map(Number);
+        const isPM = time.includes("PM");
+        const adjustedHours = isPM && hours !== 12 ? hours + 12 : (hours === 12 && !isPM ? 0 : hours);
+        startTime = new Date(date);
+        startTime.setHours(adjustedHours, minutes, 0, 0);
+      }
+
+      // Validate the computed start time is a real date, in the future,
+      // and within a reasonable booking window (365 days).
+      if (isNaN(startTime.getTime())) {
+        return res.status(400).json({ error: "Invalid booking time" });
+      }
+      const now = new Date();
+      if (startTime.getTime() < now.getTime()) {
+        return res.status(400).json({ error: "Cannot book a time in the past" });
+      }
+      const maxBookingWindow = 365 * 24 * 60 * 60 * 1000;
+      if (startTime.getTime() - now.getTime() > maxBookingWindow) {
+        return res.status(400).json({ error: "Booking date is too far in the future" });
+      }
+
       const endTime = addMinutes(startTime, eventType.duration);
 
       // Prevent double-booking: check for existing confirmed bookings in this time slot
@@ -957,7 +984,10 @@ export async function registerRoutes(
         return res.status(409).json({ error: "This time slot is no longer available" });
       }
 
-      // Create booking
+      // Create booking — sanitize guest timezone before persisting.
+      const validatedTimezone = (clientTimezone && isValidTimezone(clientTimezone))
+        ? clientTimezone
+        : "UTC";
       const booking = await storage.createBooking({
         eventTypeId: eventType.id,
         userId: eventType.userId,
@@ -967,7 +997,7 @@ export async function registerRoutes(
         startTime,
         endTime,
         status: "confirmed",
-        timezone: clientTimezone || "UTC",
+        timezone: validatedTimezone,
         notes: notes || null,
       });
 
