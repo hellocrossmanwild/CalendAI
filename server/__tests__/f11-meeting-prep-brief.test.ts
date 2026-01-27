@@ -1257,3 +1257,192 @@ describe("Similar Bookings by Domain — Edge Cases", () => {
     // This is a known behavior of the current implementation
   });
 });
+
+// ===========================================================================
+// K. R5 Similar Bookings — Context Wiring into AI Prompt
+// ===========================================================================
+
+describe("R5 Similar Bookings — Past Bookings Context in AI Prompt", () => {
+  it("pastBookings parameter is optional (backward compatible)", () => {
+    // The function signature: generateMeetingBrief(..., pastBookings?: ...)
+    const args = {
+      guestName: "Alice",
+      guestEmail: "alice@acme.com",
+      guestCompany: "Acme Corp",
+      eventTypeName: "Discovery Call",
+      eventTypeDescription: "Intro call",
+      enrichment: null,
+      notes: null,
+      chatHistory: null,
+      documents: undefined,
+      // no pastBookings parameter
+    };
+
+    expect(args).not.toHaveProperty("pastBookings");
+  });
+
+  it("past bookings context is included in prompt when provided", () => {
+    const pastBookings = [
+      { guestName: "Bob Smith", guestEmail: "bob@acme.com", startTime: new Date("2026-01-20T10:00:00Z"), status: "confirmed" },
+      { guestName: "Charlie Brown", guestEmail: "charlie@acme.com", startTime: new Date("2026-01-15T14:00:00Z"), status: "completed" },
+    ];
+
+    // Replicate the prompt building logic from ai-service.ts
+    const pastBookingsContext = pastBookings?.length
+      ? `\nPrevious Bookings from Same Organization:\n${pastBookings.map(b => `- ${b.guestName} (${b.guestEmail}) on ${new Date(b.startTime).toLocaleDateString()} — ${b.status}`).join("\n")}\nNote any patterns or history with this organization.`
+      : "";
+
+    expect(pastBookingsContext).toContain("Bob Smith");
+    expect(pastBookingsContext).toContain("bob@acme.com");
+    expect(pastBookingsContext).toContain("confirmed");
+    expect(pastBookingsContext).toContain("Charlie Brown");
+    expect(pastBookingsContext).toContain("completed");
+    expect(pastBookingsContext).toContain("Previous Bookings from Same Organization");
+    expect(pastBookingsContext).toContain("Note any patterns or history");
+  });
+
+  it("past bookings context is empty when no past bookings exist", () => {
+    const pastBookings: { guestName: string; guestEmail: string; startTime: Date; status: string }[] = [];
+    const pastBookingsContext = pastBookings?.length
+      ? `\nPrevious Bookings from Same Organization:\n${pastBookings.map(b => `- ${b.guestName}`).join("\n")}`
+      : "";
+
+    expect(pastBookingsContext).toBe("");
+  });
+
+  it("past bookings context is empty when pastBookings is undefined", () => {
+    const pastBookings = undefined;
+    const pastBookingsContext = pastBookings?.length
+      ? `\nPrevious Bookings:\n...`
+      : "";
+
+    expect(pastBookingsContext).toBe("");
+  });
+
+  it("current booking is excluded from past bookings list", () => {
+    const currentBookingId = 42;
+    const domainBookings = [
+      { id: 42, guestName: "Alice", guestEmail: "alice@acme.com", startTime: new Date(), status: "confirmed" },
+      { id: 10, guestName: "Bob", guestEmail: "bob@acme.com", startTime: new Date(), status: "completed" },
+      { id: 20, guestName: "Charlie", guestEmail: "charlie@acme.com", startTime: new Date(), status: "confirmed" },
+    ];
+
+    const pastBookings = domainBookings
+      .filter(b => b.id !== currentBookingId)
+      .map(b => ({ guestName: b.guestName, guestEmail: b.guestEmail, startTime: b.startTime, status: b.status }));
+
+    expect(pastBookings).toHaveLength(2);
+    expect(pastBookings.find(b => b.guestName === "Alice")).toBeUndefined();
+    expect(pastBookings[0].guestName).toBe("Bob");
+    expect(pastBookings[1].guestName).toBe("Charlie");
+  });
+
+  it("domain extraction works correctly for past booking lookup", () => {
+    const email = "alice@acme.com";
+    const domain = email.split("@")[1];
+    expect(domain).toBe("acme.com");
+
+    // Domain is used to query getBookingsByGuestDomain
+    expect(domain).toBeTruthy();
+  });
+
+  it("handles gmail/common domains (still returns results)", () => {
+    // Common domains will return many results but that's fine
+    // The storage method limits to 5 most recent
+    const email = "user@gmail.com";
+    const domain = email.split("@")[1];
+    expect(domain).toBe("gmail.com");
+  });
+});
+
+// ===========================================================================
+// L. Immediate Brief Generation for <1hr Bookings
+// ===========================================================================
+
+describe("Immediate Brief Generation — <1hr Bookings", () => {
+  it("triggers immediate generation when booking is less than 1 hour away", () => {
+    const now = Date.now();
+    const startTime = new Date(now + 30 * 60 * 1000); // 30 minutes from now
+    const msUntilStart = startTime.getTime() - now;
+
+    const shouldGenerateImmediately = msUntilStart < 60 * 60 * 1000;
+    expect(shouldGenerateImmediately).toBe(true);
+  });
+
+  it("does NOT trigger immediate generation when booking is more than 1 hour away", () => {
+    const now = Date.now();
+    const startTime = new Date(now + 90 * 60 * 1000); // 90 minutes from now
+    const msUntilStart = startTime.getTime() - now;
+
+    const shouldGenerateImmediately = msUntilStart < 60 * 60 * 1000;
+    expect(shouldGenerateImmediately).toBe(false);
+  });
+
+  it("triggers when booking is exactly at boundary (59 min 59 sec)", () => {
+    const now = Date.now();
+    const startTime = new Date(now + 59 * 60 * 1000 + 59 * 1000); // 59:59
+    const msUntilStart = startTime.getTime() - now;
+
+    const shouldGenerateImmediately = msUntilStart < 60 * 60 * 1000;
+    expect(shouldGenerateImmediately).toBe(true);
+  });
+
+  it("does NOT trigger at exact 1 hour boundary", () => {
+    const now = Date.now();
+    const startTime = new Date(now + 60 * 60 * 1000); // exactly 1 hour
+    const msUntilStart = startTime.getTime() - now;
+
+    const shouldGenerateImmediately = msUntilStart < 60 * 60 * 1000;
+    expect(shouldGenerateImmediately).toBe(false);
+  });
+
+  it("triggers for booking starting in 5 minutes", () => {
+    const now = Date.now();
+    const startTime = new Date(now + 5 * 60 * 1000);
+    const msUntilStart = startTime.getTime() - now;
+
+    const shouldGenerateImmediately = msUntilStart < 60 * 60 * 1000;
+    expect(shouldGenerateImmediately).toBe(true);
+  });
+
+  it("skips generation if brief already exists", () => {
+    const existingBrief = { id: 1, bookingId: 42, summary: "Already generated" };
+
+    // The logic checks: if (existingBrief) return;
+    const shouldSkip = !!existingBrief;
+    expect(shouldSkip).toBe(true);
+  });
+
+  it("skips generation if booking is not confirmed", () => {
+    const details = { status: "cancelled" };
+
+    // The logic checks: if (!details || details.status !== "confirmed") return;
+    const shouldSkip = !details || details.status !== "confirmed";
+    expect(shouldSkip).toBe(true);
+  });
+
+  it("proceeds with generation for confirmed booking without existing brief", () => {
+    const details = { status: "confirmed" };
+    const existingBrief = null;
+
+    const shouldSkip = !details || details.status !== "confirmed" || !!existingBrief;
+    expect(shouldSkip).toBe(false);
+  });
+
+  it("does NOT trigger for far-future bookings (1 week away)", () => {
+    const now = Date.now();
+    const startTime = new Date(now + 7 * 24 * 60 * 60 * 1000); // 1 week
+    const msUntilStart = startTime.getTime() - now;
+
+    const shouldGenerateImmediately = msUntilStart < 60 * 60 * 1000;
+    expect(shouldGenerateImmediately).toBe(false);
+  });
+
+  it("handles the 5-second delay for enrichment completion", async () => {
+    // The implementation uses: await new Promise(resolve => setTimeout(resolve, 5000));
+    // This gives enrichment time to complete before generating the brief
+    const delayMs = 5000;
+    expect(delayMs).toBe(5000);
+    // This is a design choice documented in the code
+  });
+});

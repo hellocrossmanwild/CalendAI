@@ -43,7 +43,17 @@ async function generateAndDeliverBrief(booking: Booking): Promise<void> {
   // 3. Get documents
   const docs = await storage.getDocuments(booking.id);
 
-  // 4. Generate the brief via AI
+  // 4. Fetch past bookings from same domain (R5: Similar Bookings)
+  const guestDomain = details.guestEmail.split("@")[1];
+  let pastBookings: { guestName: string; guestEmail: string; startTime: Date; status: string }[] = [];
+  if (guestDomain) {
+    const domainBookings = await storage.getBookingsByGuestDomain(booking.userId, guestDomain);
+    pastBookings = domainBookings
+      .filter((b: any) => b.id !== booking.id)
+      .map((b: any) => ({ guestName: b.guestName, guestEmail: b.guestEmail, startTime: b.startTime, status: b.status }));
+  }
+
+  // 5. Generate the brief via AI
   const briefData = await generateMeetingBrief(
     details.guestName,
     details.guestEmail,
@@ -53,10 +63,11 @@ async function generateAndDeliverBrief(booking: Booking): Promise<void> {
     enrichment,
     details.notes,
     details.prequalResponse?.chatHistory || null,
-    docs.map((d: any) => ({ name: d.name, contentType: d.contentType || "unknown", size: d.size || 0 }))
+    docs.map((d: any) => ({ name: d.name, contentType: d.contentType || "unknown", size: d.size || 0 })),
+    pastBookings
   );
 
-  // 5. Store the brief
+  // 6. Store the brief
   const brief = await storage.createMeetingBrief({
     bookingId: booking.id,
     summary: briefData.summary,
@@ -67,7 +78,7 @@ async function generateAndDeliverBrief(booking: Booking): Promise<void> {
 
   log(`Brief generated for booking ${booking.id} (guest: ${details.guestName})`);
 
-  // 6. Attempt to send email notification
+  // 7. Attempt to send email notification
   try {
     // Check notification preferences for the host
     const prefs = await storage.getNotificationPreferences(booking.userId);

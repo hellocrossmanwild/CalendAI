@@ -114,7 +114,8 @@ export async function generateMeetingBrief(
   enrichment: LeadEnrichmentData | null,
   notes: string | null,
   chatHistory: { role: string; content: string }[] | null,
-  documents?: { name: string; contentType: string; size: number }[]
+  documents?: { name: string; contentType: string; size: number }[],
+  pastBookings?: { guestName: string; guestEmail: string; startTime: Date; status: string }[]
 ): Promise<MeetingBriefData> {
   const enrichmentContext = enrichment
     ? `
@@ -132,6 +133,10 @@ ${chatHistory.map((m) => `${m.role}: ${m.content}`).join("\n")}`
     ? `\nUploaded Documents:\n${documents.map(d => `- ${d.name} (${d.contentType}, ${Math.round(d.size / 1024)}KB)`).join("\n")}\nPlease include a brief note about these documents in your response.`
     : "";
 
+  const pastBookingsContext = pastBookings?.length
+    ? `\nPrevious Bookings from Same Organization:\n${pastBookings.map(b => `- ${b.guestName} (${b.guestEmail}) on ${new Date(b.startTime).toLocaleDateString()} — ${b.status}`).join("\n")}\nNote any patterns or history with this organization.`
+    : "";
+
   const prompt = `You are a meeting preparation assistant. Generate a comprehensive meeting brief based on the following information.
 
 Guest: ${guestName}
@@ -143,6 +148,7 @@ ${notes ? `Additional Notes: ${notes}` : ""}
 ${enrichmentContext}
 ${chatContext}
 ${documentContext}
+${pastBookingsContext}
 
 Generate a meeting brief with:
 1. A concise summary of who this person is and what they likely want to discuss

@@ -725,6 +725,16 @@ export async function registerRoutes(
       // Get documents for this booking
       const docs = await storage.getDocuments(booking.id);
 
+      // Fetch past bookings from the same email domain (R5: Similar Bookings)
+      const guestDomain = booking.guestEmail.split("@")[1];
+      let pastBookings: { guestName: string; guestEmail: string; startTime: Date; status: string }[] = [];
+      if (guestDomain) {
+        const domainBookings = await storage.getBookingsByGuestDomain(booking.userId, guestDomain);
+        pastBookings = domainBookings
+          .filter(b => b.id !== booking.id)
+          .map(b => ({ guestName: b.guestName, guestEmail: b.guestEmail, startTime: b.startTime, status: b.status }));
+      }
+
       const briefData = await generateMeetingBrief(
         booking.guestName,
         booking.guestEmail,
@@ -734,7 +744,8 @@ export async function registerRoutes(
         booking.enrichment || null,
         booking.notes,
         booking.prequalResponse?.chatHistory || null,
-        docs.map(d => ({ name: d.name, contentType: d.contentType || "unknown", size: d.size || 0 }))
+        docs.map(d => ({ name: d.name, contentType: d.contentType || "unknown", size: d.size || 0 })),
+        pastBookings
       );
 
       const brief = await storage.createMeetingBrief({
@@ -1448,6 +1459,62 @@ export async function registerRoutes(
           console.error("Auto-enrichment failed for booking", booking.id, err);
         }
       })();
+
+      // Fire-and-forget: if booking is less than 1 hour away, generate brief immediately
+      // (the scheduler only checks 1-2 hours ahead, so <1hr bookings would be missed)
+      const msUntilStart = startTime.getTime() - Date.now();
+      if (msUntilStart < 60 * 60 * 1000) {
+        (async () => {
+          try {
+            // Small delay to allow enrichment to complete first
+            await new Promise(resolve => setTimeout(resolve, 5000));
+
+            const details = await storage.getBookingWithDetails(booking.id);
+            if (!details || details.status !== "confirmed") return;
+
+            // Skip if brief was already generated
+            const existingBrief = await storage.getMeetingBrief(booking.id);
+            if (existingBrief) return;
+
+            const docs = await storage.getDocuments(booking.id);
+
+            // Fetch past bookings from same domain
+            const domain = booking.guestEmail.split("@")[1];
+            let pastBookingsForBrief: { guestName: string; guestEmail: string; startTime: Date; status: string }[] = [];
+            if (domain) {
+              const domainBookings = await storage.getBookingsByGuestDomain(booking.userId, domain);
+              pastBookingsForBrief = domainBookings
+                .filter(b => b.id !== booking.id)
+                .map(b => ({ guestName: b.guestName, guestEmail: b.guestEmail, startTime: b.startTime, status: b.status }));
+            }
+
+            const briefData = await generateMeetingBrief(
+              details.guestName,
+              details.guestEmail,
+              details.guestCompany,
+              details.eventType?.name || "Meeting",
+              details.eventType?.description || null,
+              details.enrichment || null,
+              details.notes,
+              details.prequalResponse?.chatHistory || null,
+              docs.map((d: any) => ({ name: d.name, contentType: d.contentType || "unknown", size: d.size || 0 })),
+              pastBookingsForBrief
+            );
+
+            await storage.createMeetingBrief({
+              bookingId: booking.id,
+              summary: briefData.summary,
+              talkingPoints: briefData.talkingPoints,
+              keyContext: briefData.keyContext,
+              documentAnalysis: briefData.documentAnalysis || null,
+            });
+
+            console.log(`Immediate brief generated for booking ${booking.id} (starts in <1hr)`);
+          } catch (err) {
+            console.error("Immediate brief generation failed for booking", booking.id, err);
+          }
+        })();
+      }
     } catch (error) {
       console.error("Error creating booking:", error);
       res.status(400).json({ error: "Failed to create booking" });
