@@ -101,6 +101,7 @@ export const meetingBriefs = pgTable("meeting_briefs", {
   keyContext: jsonb("key_context").$type<string[]>(),
   documentAnalysis: text("document_analysis"),
   generatedAt: timestamp("generated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  readAt: timestamp("read_at"),
 });
 
 // Availability Rules - configurable working hours per user

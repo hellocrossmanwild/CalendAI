@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Search, FileText, Calendar, Clock, ArrowRight, Sparkles } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Search, FileText, Calendar, Clock, ArrowRight, Sparkles, RefreshCw, Loader2 } from "lucide-react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,14 +8,30 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { BookingWithDetails } from "@shared/schema";
 import { format, parseISO, isToday, isTomorrow } from "date-fns";
 
 export default function BriefsPage() {
   const [search, setSearch] = useState("");
+  const { toast } = useToast();
 
   const { data: bookings, isLoading } = useQuery<BookingWithDetails[]>({
     queryKey: ["/api/bookings"],
+  });
+
+  const regenerateMutation = useMutation({
+    mutationFn: async (bookingId: number) => {
+      return apiRequest("POST", `/api/bookings/${bookingId}/generate-brief?force=true`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+      toast({ title: "Brief regenerated successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to regenerate brief", description: error.message, variant: "destructive" });
+    },
   });
 
   const bookingsWithBriefs = bookings?.filter((b) => b.brief) || [];
@@ -117,7 +133,7 @@ export default function BriefsPage() {
       ) : (
         <div className="space-y-4">
           {filteredBookings.map((booking) => (
-            <Card key={booking.id} className="overflow-visible">
+            <Card key={booking.id} className={`overflow-visible ${!booking.brief?.readAt ? "border-l-4 border-l-primary" : ""}`}>
               <CardContent className="p-6">
                 <div className="flex items-start gap-4">
                   <Avatar className="h-12 w-12 shrink-0">
@@ -127,7 +143,12 @@ export default function BriefsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-4 mb-3">
                       <div>
-                        <h3 className="font-semibold">{booking.guestName}</h3>
+                        <h3 className="font-semibold">
+                          {booking.guestName}
+                          {!booking.brief?.readAt && (
+                            <Badge variant="default" className="ml-2 text-xs">New</Badge>
+                          )}
+                        </h3>
                         <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
                           <span className="flex items-center gap-1">
                             <Calendar className="h-3.5 w-3.5" />
@@ -139,12 +160,26 @@ export default function BriefsPage() {
                           </span>
                         </div>
                       </div>
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link href={`/bookings/${booking.id}`} data-testid={`link-view-${booking.id}`}>
-                          View Full Brief
-                          <ArrowRight className="h-4 w-4 ml-1" />
-                        </Link>
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => regenerateMutation.mutate(booking.id)}
+                          disabled={regenerateMutation.isPending}
+                        >
+                          {regenerateMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                        </Button>
+                        <Button variant="ghost" size="sm" asChild>
+                          <Link href={`/bookings/${booking.id}`} data-testid={`link-view-${booking.id}`}>
+                            View Full Brief
+                            <ArrowRight className="h-4 w-4 ml-1" />
+                          </Link>
+                        </Button>
+                      </div>
                     </div>
 
                     {booking.brief?.summary && (

@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { eq, and, desc, gte, asc, lt } from "drizzle-orm";
+import { eq, and, desc, gte, asc, lt, sql } from "drizzle-orm";
 import {
   type User,
   type UpsertUser,
@@ -70,6 +70,8 @@ export interface IStorage {
   getBookingWithDetails(id: number): Promise<any>;
   getBookingsWithDetails(userId: string): Promise<any[]>;
   getBookingsByDateRange(userId: string, startDate: Date, endDate: Date): Promise<Booking[]>;
+  getUpcomingBookingsWithoutBriefs(startDate: Date, endDate: Date): Promise<Booking[]>;
+  getBookingsByGuestDomain(userId: string, domain: string): Promise<Booking[]>;
   createBooking(data: InsertBooking): Promise<Booking>;
   updateBooking(id: number, data: Partial<InsertBooking>): Promise<Booking | undefined>;
   deleteBooking(id: number): Promise<void>;
@@ -89,6 +91,9 @@ export interface IStorage {
   getMeetingBrief(bookingId: number): Promise<MeetingBrief | undefined>;
   createMeetingBrief(data: InsertMeetingBrief): Promise<MeetingBrief>;
   updateMeetingBrief(id: number, data: Partial<InsertMeetingBrief>): Promise<MeetingBrief | undefined>;
+  deleteMeetingBrief(bookingId: number): Promise<void>;
+  markBriefAsRead(bookingId: number): Promise<MeetingBrief | undefined>;
+  getUnreadBriefsCount(userId: string): Promise<number>;
 
   getAvailabilityRules(userId: string): Promise<AvailabilityRules | undefined>;
   upsertAvailabilityRules(data: InsertAvailabilityRules): Promise<AvailabilityRules>;
@@ -273,6 +278,35 @@ export class DatabaseStorage implements IStorage {
       .orderBy(asc(bookings.startTime));
   }
 
+  async getUpcomingBookingsWithoutBriefs(startDate: Date, endDate: Date): Promise<Booking[]> {
+    return db
+      .select()
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.status, "confirmed"),
+          gte(bookings.startTime, startDate),
+          lt(bookings.startTime, endDate),
+          sql`${bookings.id} NOT IN (SELECT booking_id FROM meeting_briefs)`
+        )
+      )
+      .orderBy(asc(bookings.startTime));
+  }
+
+  async getBookingsByGuestDomain(userId: string, domain: string): Promise<Booking[]> {
+    return db
+      .select()
+      .from(bookings)
+      .where(
+        and(
+          eq(bookings.userId, userId),
+          sql`${bookings.guestEmail} LIKE ${'%@' + domain}`
+        )
+      )
+      .orderBy(desc(bookings.startTime))
+      .limit(5);
+  }
+
   async createBooking(data: InsertBooking): Promise<Booking> {
     const [booking] = await db.insert(bookings).values(data).returning();
     return booking;
@@ -360,6 +394,33 @@ export class DatabaseStorage implements IStorage {
   async updateMeetingBrief(id: number, data: Partial<InsertMeetingBrief>): Promise<MeetingBrief | undefined> {
     const [brief] = await db.update(meetingBriefs).set(data).where(eq(meetingBriefs.id, id)).returning();
     return brief;
+  }
+
+  async deleteMeetingBrief(bookingId: number): Promise<void> {
+    await db.delete(meetingBriefs).where(eq(meetingBriefs.bookingId, bookingId));
+  }
+
+  async markBriefAsRead(bookingId: number): Promise<MeetingBrief | undefined> {
+    const [brief] = await db
+      .update(meetingBriefs)
+      .set({ readAt: new Date() })
+      .where(eq(meetingBriefs.bookingId, bookingId))
+      .returning();
+    return brief;
+  }
+
+  async getUnreadBriefsCount(userId: string): Promise<number> {
+    const result = await db
+      .select()
+      .from(meetingBriefs)
+      .innerJoin(bookings, eq(meetingBriefs.bookingId, bookings.id))
+      .where(
+        and(
+          eq(bookings.userId, userId),
+          sql`${meetingBriefs.readAt} IS NULL`
+        )
+      );
+    return result.length;
   }
 
   async getAvailabilityRules(userId: string): Promise<AvailabilityRules | undefined> {

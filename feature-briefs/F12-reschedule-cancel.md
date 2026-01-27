@@ -247,3 +247,12 @@ ALTER TABLE bookings ADD COLUMN cancellation_reason TEXT;
 - **Booking endpoint validation pattern should be reused.** F06 added server-side validation for bookings: valid date, not in past, and within a 365-day window. The reschedule endpoint should apply the same validation rules to the new time slot.
 - **409 conflict handling pattern (optimistic UI) from F06 should be reused for reschedule conflicts.** F06 established the HTTP 409 conflict response for double-booking prevention at write time. The reschedule flow should use the same pattern — attempt the reschedule optimistically and handle 409 responses gracefully in the UI (e.g., "This slot was just taken, please choose another time").
 - **Dynamic slot intervals available.** F06 implemented `Math.min(duration, 30)` for slot interval calculation. The reschedule availability view will automatically benefit from this, showing appropriately spaced time slots based on event duration.
+
+---
+
+## Impact from F11 Implementation
+
+- **When a booking is rescheduled, the existing meeting brief should be regenerated.** F11 added `force=true` support to `POST /api/bookings/:id/generate-brief` and a `deleteMeetingBrief(bookingId)` storage method. After rescheduling a booking, call the brief generation endpoint with `force=true` to generate a fresh brief with updated time context.
+- **The brief scheduler will also detect rescheduled bookings.** If a rescheduled booking falls within the 1-2 hour window and doesn't have a brief, the scheduler will auto-generate one. However, if the original brief wasn't deleted, the scheduler won't regenerate it. F12 should explicitly delete or regenerate the brief during the reschedule flow.
+- **Cancelled bookings are excluded from automatic brief generation.** The brief scheduler only queries `confirmed` status bookings, so cancelled bookings are never auto-briefed.
+- **Brief read status (`readAt`) should be reset on reschedule.** If a brief is regenerated for a rescheduled booking, it will have a new `readAt: null`, correctly appearing as unread.

@@ -1,5 +1,7 @@
 import { Calendar, CalendarPlus, Users, FileText, Settings, Home, LayoutDashboard } from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
+import { Badge } from "@/components/ui/badge";
 import {
   Sidebar,
   SidebarContent,
@@ -30,6 +32,11 @@ const settingsItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
+
+  const { data: unreadData } = useQuery<{ count: number }>({
+    queryKey: ["/api/briefs/unread-count"],
+    refetchInterval: 60000, // Refresh every minute
+  });
 
   const getInitials = () => {
     if (user?.firstName && user?.lastName) {
@@ -66,6 +73,11 @@ export function AppSidebar() {
                     <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase().replace(' ', '-')}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
+                      {item.title === "Meeting Briefs" && unreadData?.count && unreadData.count > 0 && (
+                        <Badge variant="default" className="ml-auto text-xs h-5 min-w-5 flex items-center justify-center">
+                          {unreadData.count}
+                        </Badge>
+                      )}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

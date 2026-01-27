@@ -318,3 +318,10 @@ CREATE TABLE notification_preferences (
 - **Lead scores are now available on enrichment records.** F08 added `leadScore` (integer), `leadScoreLabel` ("High"/"Medium"/"Low"), and `leadScoreReasoning` (human-readable factor breakdown) to the `lead_enrichments` table. Host notification emails (R2) can include the lead score badge and reasoning to give hosts immediate context about lead quality.
 - **`enrichment.leadScoreLabel` and `enrichment.leadScore` are available for email template rendering.** The host notification email template (R2) can render a color-coded score indicator (e.g., "Lead Score: High (75)") and optionally include the reasoning string (e.g., "Executive role (+20), Company size 51+ (+20), Clear use case (+15)").
 - **Auto-enrichment runs after booking creation, but is async.** F08's auto-enrichment fires as a non-blocking IIFE after the booking response is sent in `POST /api/public/book`. By the time the host notification email is composed, the enrichment and score may already be available -- but since enrichment is async, it might not be ready immediately. F09 should either: (a) include the score if available at email-send time, or (b) send the notification email after a brief delay to allow enrichment to complete, or (c) send without score and let the host check the dashboard for score details.
+
+---
+
+## Impact from F11 Implementation
+
+- **F11 added `meetingPrepBriefEmail()` template to `server/email-templates.ts`.** This is the 6th email template in the system, following the existing patterns (escapeHtml, wrapHtml, formatDateTime). It sends a comprehensive meeting prep brief to the host including guest info, enrichment data, lead score, talking points, key context, and document analysis.
+- **Brief emails respect the `meetingBriefEmail` notification preference.** Both the brief scheduler and manual brief generation check `notification_preferences.meetingBriefEmail` before sending. If the preference is `false`, email is skipped but the brief is still generated and stored.

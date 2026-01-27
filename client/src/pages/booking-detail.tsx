@@ -1,6 +1,7 @@
+import { useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
-import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone, TrendingUp, CheckCircle, XCircle } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone, TrendingUp, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +49,19 @@ export default function BookingDetailPage() {
     },
   });
 
+  const regenerateBriefMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/bookings/${params?.id}/generate-brief?force=true`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings", params?.id] });
+      toast({ title: "Meeting brief regenerated" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to regenerate brief", description: error.message, variant: "destructive" });
+    },
+  });
+
   const statusMutation = useMutation({
     mutationFn: async (newStatus: string) => {
       return apiRequest("PATCH", `/api/bookings/${params?.id}/status`, { status: newStatus });
@@ -70,6 +84,15 @@ export default function BookingDetailPage() {
       .toUpperCase()
       .slice(0, 2);
   };
+
+  // Mark brief as read when viewed
+  useEffect(() => {
+    if (booking?.brief && !booking.brief.readAt) {
+      apiRequest("PATCH", `/api/bookings/${params?.id}/brief/read`).catch(() => {});
+      // Also invalidate the unread count
+      queryClient.invalidateQueries({ queryKey: ["/api/briefs/unread-count"] });
+    }
+  }, [booking?.brief, params?.id]);
 
   if (isLoading) {
     return (
@@ -327,6 +350,12 @@ export default function BookingDetailPage() {
                 <CardDescription>AI-generated preparation summary</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {booking.timezone && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
+                    <Globe className="h-4 w-4" />
+                    Guest timezone: {booking.timezone}
+                  </div>
+                )}
                 {brief.summary && (
                   <div>
                     <h4 className="text-sm font-medium mb-2">Summary</h4>
@@ -357,6 +386,12 @@ export default function BookingDetailPage() {
                         </li>
                       ))}
                     </ul>
+                  </div>
+                )}
+                {brief.documentAnalysis && (
+                  <div>
+                    <h4 className="text-sm font-medium mb-2">Document Analysis</h4>
+                    <p className="text-sm text-muted-foreground">{brief.documentAnalysis}</p>
                   </div>
                 )}
               </CardContent>
@@ -402,9 +437,19 @@ export default function BookingDetailPage() {
                 </Button>
               )}
               {enrichment && brief && (
-                <p className="text-sm text-muted-foreground text-center py-2">
-                  All AI features complete
-                </p>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => regenerateBriefMutation.mutate()}
+                  disabled={regenerateBriefMutation.isPending}
+                >
+                  {regenerateBriefMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                  )}
+                  Regenerate Brief
+                </Button>
               )}
               {booking.status !== "cancelled" && (
                 <>
