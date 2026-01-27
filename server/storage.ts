@@ -19,6 +19,8 @@ import {
   type InsertAvailabilityRules,
   type CalendarToken,
   type InsertCalendarToken,
+  type NotificationPreferences,
+  type InsertNotificationPreferences,
   type EventTypeWithHost,
   eventTypes,
   bookings,
@@ -28,6 +30,7 @@ import {
   meetingBriefs,
   availabilityRules,
   calendarTokens,
+  notificationPreferences,
 } from "@shared/schema";
 import { users, passwordResetTokens, magicLinkTokens, emailVerificationTokens } from "@shared/models/auth";
 
@@ -93,6 +96,14 @@ export interface IStorage {
   getCalendarToken(userId: string): Promise<CalendarToken | undefined>;
   upsertCalendarToken(data: InsertCalendarToken): Promise<CalendarToken>;
   deleteCalendarToken(userId: string): Promise<void>;
+
+  // Booking token lookups
+  getBookingByRescheduleToken(token: string): Promise<Booking | undefined>;
+  getBookingByCancelToken(token: string): Promise<Booking | undefined>;
+
+  // Notification preferences
+  getNotificationPreferences(userId: string): Promise<NotificationPreferences | undefined>;
+  upsertNotificationPreferences(data: InsertNotificationPreferences): Promise<NotificationPreferences>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -432,6 +443,41 @@ export class DatabaseStorage implements IStorage {
 
   async markEmailVerificationTokenUsed(id: number): Promise<void> {
     await db.update(emailVerificationTokens).set({ used: true }).where(eq(emailVerificationTokens.id, id));
+  }
+
+  // Booking token lookups
+  async getBookingByRescheduleToken(token: string): Promise<Booking | undefined> {
+    const [booking] = await db.select().from(bookings).where(eq(bookings.rescheduleToken, token)).limit(1);
+    return booking;
+  }
+
+  async getBookingByCancelToken(token: string): Promise<Booking | undefined> {
+    const [booking] = await db.select().from(bookings).where(eq(bookings.cancelToken, token)).limit(1);
+    return booking;
+  }
+
+  // Notification preferences
+  async getNotificationPreferences(userId: string): Promise<NotificationPreferences | undefined> {
+    const [prefs] = await db.select().from(notificationPreferences).where(eq(notificationPreferences.userId, userId)).limit(1);
+    return prefs;
+  }
+
+  async upsertNotificationPreferences(data: InsertNotificationPreferences): Promise<NotificationPreferences> {
+    const [prefs] = await db
+      .insert(notificationPreferences)
+      .values(data)
+      .onConflictDoUpdate({
+        target: notificationPreferences.userId,
+        set: {
+          newBookingEmail: data.newBookingEmail,
+          meetingBriefEmail: data.meetingBriefEmail,
+          dailyDigest: data.dailyDigest,
+          cancellationEmail: data.cancellationEmail,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return prefs;
   }
 }
 
