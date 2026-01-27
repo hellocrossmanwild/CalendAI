@@ -97,6 +97,8 @@ export interface IStorage {
   upsertCalendarToken(data: InsertCalendarToken): Promise<CalendarToken>;
   deleteCalendarToken(userId: string): Promise<void>;
 
+  updateBookingStatus(id: number, status: string): Promise<Booking | undefined>;
+
   // Booking token lookups
   getBookingByRescheduleToken(token: string): Promise<Booking | undefined>;
   getBookingByCancelToken(token: string): Promise<Booking | undefined>;
@@ -283,6 +285,15 @@ export class DatabaseStorage implements IStorage {
 
   async deleteBooking(id: number): Promise<void> {
     await db.update(bookings).set({ status: "cancelled" }).where(eq(bookings.id, id));
+  }
+
+  async updateBookingStatus(id: number, status: string): Promise<Booking | undefined> {
+    const [booking] = await db
+      .update(bookings)
+      .set({ status })
+      .where(eq(bookings.id, id))
+      .returning();
+    return booking;
   }
 
   async getLeadEnrichment(bookingId: number): Promise<LeadEnrichment | undefined> {

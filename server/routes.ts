@@ -600,6 +600,39 @@ export async function registerRoutes(
     }
   });
 
+  // Booking Status Management (F10 R6)
+  const VALID_BOOKING_STATUSES = ["confirmed", "completed", "cancelled", "no-show"];
+
+  app.patch("/api/bookings/:id/status", requireAuth, async (req, res) => {
+    try {
+      const { status } = req.body;
+      if (!status || !VALID_BOOKING_STATUSES.includes(status)) {
+        return res.status(400).json({
+          error: `Invalid status. Must be one of: ${VALID_BOOKING_STATUSES.join(", ")}`,
+        });
+      }
+
+      const booking = await storage.getBooking(parseInt(req.params.id));
+      if (!booking || booking.userId !== req.user!.id) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+
+      if (booking.status === "cancelled") {
+        return res.status(400).json({ error: "Cannot change status of a cancelled booking" });
+      }
+
+      if (booking.status === status) {
+        return res.status(400).json({ error: `Booking is already ${status}` });
+      }
+
+      const updated = await storage.updateBookingStatus(booking.id, status);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating booking status:", error);
+      res.status(500).json({ error: "Failed to update booking status" });
+    }
+  });
+
   // AI Features - Lead Enrichment
   app.post("/api/bookings/:id/enrich", requireAuth, async (req, res) => {
     try {
