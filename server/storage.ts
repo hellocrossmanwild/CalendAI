@@ -19,6 +19,7 @@ import {
   type InsertAvailabilityRules,
   type CalendarToken,
   type InsertCalendarToken,
+  type EventTypeWithHost,
   eventTypes,
   bookings,
   leadEnrichments,
@@ -56,6 +57,7 @@ export interface IStorage {
   getEventTypes(userId: string): Promise<EventType[]>;
   getEventType(id: number): Promise<EventType | undefined>;
   getEventTypeBySlug(slug: string): Promise<EventType | undefined>;
+  getEventTypeBySlugWithHost(slug: string): Promise<EventTypeWithHost | undefined>;
   createEventType(data: InsertEventType): Promise<EventType>;
   updateEventType(id: number, data: Partial<InsertEventType>): Promise<EventType | undefined>;
   deleteEventType(id: number): Promise<void>;
@@ -148,6 +150,30 @@ export class DatabaseStorage implements IStorage {
   async getEventTypeBySlug(slug: string): Promise<EventType | undefined> {
     const [eventType] = await db.select().from(eventTypes).where(eq(eventTypes.slug, slug)).limit(1);
     return eventType;
+  }
+
+  async getEventTypeBySlugWithHost(slug: string): Promise<EventTypeWithHost | undefined> {
+    const [eventType] = await db.select().from(eventTypes).where(eq(eventTypes.slug, slug)).limit(1);
+    if (!eventType) return undefined;
+
+    const [user] = await db
+      .select({
+        firstName: users.firstName,
+        lastName: users.lastName,
+        profileImageUrl: users.profileImageUrl,
+      })
+      .from(users)
+      .where(eq(users.id, eventType.userId))
+      .limit(1);
+
+    return {
+      ...eventType,
+      host: {
+        firstName: user?.firstName ?? null,
+        lastName: user?.lastName ?? null,
+        profileImageUrl: user?.profileImageUrl ?? null,
+      },
+    };
   }
 
   async createEventType(data: InsertEventType): Promise<EventType> {

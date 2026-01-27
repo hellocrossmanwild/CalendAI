@@ -13,6 +13,13 @@
 - **`sendEmail()` stub ready** — notification emails for reschedule/cancel (R2–R4) can use the existing stub, which F09 will later replace with real delivery.
 - **Storage pattern for token CRUD** — `createToken()`, `getToken()`, `markTokenUsed()` methods in `server/storage.ts` demonstrate the pattern for booking token management.
 
+### Impact from F05 Implementation
+
+- **Confirmation page redesigned** — F05 replaced the misleading confirmation page with a clean design showing booking details (date, time, event type, host name), ICS file download, and Google Calendar link. This layout can accommodate reschedule/cancel action links once F12 is implemented.
+- **Branding applied to booking page** — F05 applies `primaryColor` and `secondaryColor` consistently across all booking steps via CSS custom properties. The public cancel and reschedule pages (R2, R3) should use the same branded styling for visual consistency.
+- **Host info available on public API** — F05 expanded `GET /api/public/event-types/:slug` to include host firstName, lastName, and profileImageUrl. The public reschedule and cancel pages can display host info without additional API changes.
+- **`guestTimezone` stored on bookings** — F05 added this field. Reschedule and cancel pages can display times in the booker's original timezone.
+
 ### Impact from F02 Implementation
 
 - **F02 dependency is satisfied** — Google Calendar event CRUD is fully implemented.
@@ -223,3 +230,12 @@ ALTER TABLE bookings ADD COLUMN cancellation_reason TEXT;
 - Reschedule/cancel pages should be styled consistently with the booking page but don't require authentication.
 - If F09 (email) is not yet complete, the tokens can still be generated and the pages can still work — just without email delivery of the links. You could show the links on the confirmation page instead.
 - Consider adding a simple audit log of reschedule/cancel actions for the host to see in the booking detail.
+
+---
+
+## Dependencies & Implications from F05
+
+- **Confirmation page is ready for reschedule/cancel links.** F05 redesigned the confirmation page with a clean layout showing booking details, ICS download, and Google Calendar link. Reschedule and cancel links can be added to this page once F12 generates booking tokens. The existing layout has space for action buttons.
+- **Branded styling available.** F05 applies CSS custom properties (`--brand-primary`, `--brand-secondary`) across all booking steps. The public cancel page (`/booking/cancel/:token`) and reschedule page (`/booking/reschedule/:token`) should use the same CSS custom property pattern for visual consistency with the booking page.
+- **Host info already on public API.** F05 expanded the public event type endpoint to include host data. Cancel and reschedule pages can display host name and avatar without additional backend work.
+- **`guestTimezone` available on booking records.** F05 stores the guest's timezone on the booking. Cancel/reschedule confirmation messages and emails can display times in the booker's timezone.

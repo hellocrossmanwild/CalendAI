@@ -894,11 +894,13 @@ export async function registerRoutes(
   // Public Routes - Booking Page
   app.get("/api/public/event-types/:slug", async (req, res) => {
     try {
-      const eventType = await storage.getEventTypeBySlug(req.params.slug);
+      const eventType = await storage.getEventTypeBySlugWithHost(req.params.slug);
       if (!eventType || !eventType.isActive) {
         return res.status(404).json({ error: "Event type not found" });
       }
-      res.json(eventType);
+      // Strip internal fields from public response
+      const { userId, ...publicEventType } = eventType;
+      res.json(publicEventType);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch event type" });
     }
@@ -913,6 +915,8 @@ export async function registerRoutes(
 
       const dateStr = req.query.date as string;
       const date = dateStr ? new Date(dateStr) : new Date();
+      // Accept guest timezone for future timezone-aware slot rendering
+      const _guestTimezone = (req.query.timezone as string) || "UTC";
 
       const slots = await calculateAvailability(eventType.userId, eventType.id, date);
       res.json(slots);
