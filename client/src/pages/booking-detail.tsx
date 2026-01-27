@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
-import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin } from "lucide-react";
+import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -150,6 +150,14 @@ export default function BookingDetailPage() {
                   <Mail className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm">{booking.guestEmail}</span>
                 </div>
+                {booking.guestPhone && (
+                  <div className="flex items-center gap-3">
+                    <Phone className="h-4 w-4 text-muted-foreground" />
+                    <a href={`tel:${booking.guestPhone}`} className="text-sm text-primary hover:underline">
+                      {booking.guestPhone}
+                    </a>
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
                   <Globe className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm">{booking.timezone}</span>

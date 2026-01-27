@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, Search, MoreVertical, Trash2, FileText, User, Clock, Mail, Building } from "lucide-react";
+import { Calendar, Search, MoreVertical, Trash2, FileText, User, Clock, Mail, Building, Phone } from "lucide-react";
 import { Link } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -182,6 +182,12 @@ export default function BookingsPage() {
                               <Building className="h-3.5 w-3.5" />
                               {booking.guestCompany}
                             </span>
+                          )}
+                          {booking.guestPhone && (
+                            <a href={`tel:${booking.guestPhone}`} className="flex items-center gap-1 hover:text-primary transition-colors">
+                              <Phone className="h-3.5 w-3.5" />
+                              {booking.guestPhone}
+                            </a>
                           )}
                         </div>
                       </div>

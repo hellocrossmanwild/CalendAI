@@ -20,6 +20,12 @@
 
 - **Website scanner could be reused** — F04's `server/website-scanner.ts` performs website fetching and AI-powered content extraction. The `scanWebsite()` function or its HTML extraction helpers could be reused in R5 (Enhanced AI Enrichment) to fetch real company website data instead of relying solely on AI inference from email domains.
 
+### Impact from F07 Implementation
+
+- **`guestPhone` now available on bookings.** F07 added an optional phone number field with validation to the booking info form. The `guestPhone` column on the `bookings` table can be used by F08's lead scoring system: per the PRD, providing a phone number adds +5 points to the lead score.
+- **Document uploads in chat are tracked.** F07 implemented document upload within the pre-qualification chat (paperclip button + drag & drop). Document presence on a booking can be used for lead scoring: per the PRD, uploading a document adds +10 points.
+- **`extractedData` from pre-qual chat provides structured enrichment context.** F07's AI summary card generates structured `extractedData` containing company name, summary, keyPoints, timeline, and document references. F08's `enrichAndScore()` can consume this structured data directly instead of re-parsing the raw chat transcript, improving enrichment accuracy and reducing redundant AI calls.
+
 ---
 
 ## Current State

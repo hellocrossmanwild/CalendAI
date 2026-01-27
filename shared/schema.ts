@@ -34,6 +34,7 @@ export const bookings = pgTable("bookings", {
   userId: varchar("user_id").notNull(),
   guestName: text("guest_name").notNull(),
   guestEmail: text("guest_email").notNull(),
+  guestPhone: text("guest_phone"),
   guestCompany: text("guest_company"),
   startTime: timestamp("start_time").notNull(),
   endTime: timestamp("end_time").notNull(),
@@ -185,9 +186,13 @@ export const insertEventTypeSchema = createInsertSchema(eventTypes).omit({
   updatedAt: true,
 });
 
+export const phoneRegex = /^\+?[\d\s\-()]+$/;
+
 export const insertBookingSchema = createInsertSchema(bookings).omit({
   id: true,
   createdAt: true,
+}).extend({
+  guestPhone: z.string().regex(phoneRegex, "Invalid phone number format").nullish(),
 });
 
 export const insertLeadEnrichmentSchema = createInsertSchema(leadEnrichments).omit({

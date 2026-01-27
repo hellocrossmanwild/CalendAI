@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRoute } from "wouter";
-import { Calendar, Clock, ChevronLeft, ChevronRight, Loader2, CheckCircle, ArrowLeft, Send, Upload, X, Paperclip, CalendarPlus, ExternalLink, User, Mail, Globe, ChevronDown } from "lucide-react";
+import { Calendar, Clock, ChevronLeft, ChevronRight, Loader2, CheckCircle, ArrowLeft, Send, Upload, X, Paperclip, CalendarPlus, ExternalLink, User, Mail, Globe, ChevronDown, FileText, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,20 @@ interface ChatMessage {
 }
 
 type BookingStep = "calendar" | "time" | "info" | "chat" | "confirm";
+
+interface ExtractedData {
+  name?: string;
+  email?: string;
+  company?: string;
+  summary?: string;
+  keyPoints?: string[];
+  timeline?: string;
+  documents?: string[];
+}
+
+const ACCEPTED_FILE_TYPES = [".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg"];
+const MAX_FILE_SIZE_MB = 10;
+const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024;
 
 // --- SEO Meta Tag Helpers ---
 
@@ -119,12 +133,19 @@ export default function BookPage() {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    phone: "",
     company: "",
     notes: "",
   });
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; path: string }[]>([]);
+  const [phoneError, setPhoneError] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [chatComplete, setChatComplete] = useState(false);
+  const [extractedData, setExtractedData] = useState<ExtractedData | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const chatFileInputRef = useRef<HTMLInputElement>(null);
   const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [showTimezoneSelector, setShowTimezoneSelector] = useState(false);
   const timezoneSelectorRef = useRef<HTMLDivElement>(null);
@@ -267,6 +288,7 @@ export default function BookPage() {
       startTimeUTC?: string;
       name: string;
       email: string;
+      phone?: string;
       company?: string;
       notes?: string;
       timezone?: string;
@@ -313,6 +335,9 @@ export default function BookPage() {
 
   const chatMutation = useMutation({
     mutationFn: async (message: string) => {
+      const hostName = eventType?.host
+        ? `${eventType.host.firstName || ""} ${eventType.host.lastName || ""}`.trim() || undefined
+        : undefined;
       const response = await fetch("/api/public/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -320,20 +345,25 @@ export default function BookPage() {
           eventTypeSlug: params?.slug,
           messages: [...chatMessages, { role: "user", content: message }],
           guestInfo: formData,
+          hostName,
         }),
       });
       return response.json();
     },
-    onSuccess: (data) => {
-      const newUserMsg: ChatMessage = { role: "user", content: chatInput };
+    onSuccess: (data, message) => {
+      const newUserMsg: ChatMessage = { role: "user", content: message };
       const newAssistantMsg: ChatMessage = { role: "assistant", content: data.response };
 
       setChatMessages((prev) => [...prev, newUserMsg, newAssistantMsg]);
-      setChatInput("");
+
+      // Only clear chat input for text messages, not document uploads
+      if (!message.startsWith("[Document uploaded:")) {
+        setChatInput("");
+      }
 
       if (data.complete) {
-        // Build full history explicitly to avoid stale closure over chatMessages
-        handleBooking([...chatMessages, newUserMsg, newAssistantMsg]);
+        setChatComplete(true);
+        setExtractedData(data.extractedData || null);
       }
     },
   });
@@ -355,15 +385,39 @@ export default function BookPage() {
   };
 
   const handleInfoSubmit = () => {
+    // Reset validation errors
+    setPhoneError("");
+    setEmailError("");
+
     if (!formData.name || !formData.email) {
       toast({ title: "Please fill in required fields", variant: "destructive" });
       return;
     }
-    
+
+    let hasError = false;
+
+    // Email validation
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailPattern.test(formData.email)) {
+      setEmailError("Please enter a valid email address");
+      hasError = true;
+    }
+
+    // Phone validation (optional field)
+    const phoneRegex = /^\+?[\d\s\-()]+$/;
+    if (formData.phone && !phoneRegex.test(formData.phone)) {
+      setPhoneError("Please enter a valid phone number");
+      hasError = true;
+    }
+
+    if (hasError) return;
+
     if (eventType?.questions && eventType.questions.length > 0) {
       setChatMessages([
         { role: "assistant", content: `Hi ${formData.name}! I have a few quick questions to make sure this meeting is a good fit. ${eventType.questions[0]}` },
       ]);
+      setChatComplete(false);
+      setExtractedData(null);
       setStep("chat");
     } else {
       handleBooking();
@@ -385,6 +439,7 @@ export default function BookPage() {
       startTimeUTC: selectedTimeUTC || undefined,
       name: formData.name,
       email: formData.email,
+      phone: formData.phone || undefined,
       company: formData.company,
       notes: formData.notes,
       timezone,
@@ -427,6 +482,86 @@ export default function BookPage() {
 
   const removeFile = (index: number) => {
     setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleChatFileUpload = async (file: File) => {
+    // Validate file type
+    const ext = "." + (file.name.split(".").pop()?.toLowerCase() || "");
+    if (!ACCEPTED_FILE_TYPES.includes(ext)) {
+      toast({
+        title: "Invalid file type",
+        description: `Accepted types: ${ACCEPTED_FILE_TYPES.join(", ")}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Validate file size
+    if (file.size > MAX_FILE_SIZE) {
+      toast({
+        title: "File too large",
+        description: `Maximum file size is ${MAX_FILE_SIZE_MB}MB`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Sanitize filename (strip path components)
+    const sanitizedName = file.name.replace(/^.*[\\/]/, "");
+
+    try {
+      const urlResponse = await fetch("/api/uploads/request-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: sanitizedName,
+          size: file.size,
+          contentType: file.type,
+        }),
+      });
+      const { uploadURL, objectPath } = await urlResponse.json();
+
+      await fetch(uploadURL, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type },
+      });
+
+      setUploadedFiles((prev) => [...prev, { name: sanitizedName, path: objectPath }]);
+
+      // Send document notification to AI via chat
+      const docMessage = `[Document uploaded: ${sanitizedName}]`;
+      chatMutation.mutate(docMessage);
+    } catch {
+      toast({ title: "Upload failed", variant: "destructive" });
+    }
+  };
+
+  const handleChatFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleChatFileUpload(file);
+    // Reset file input so the same file can be uploaded again
+    e.target.value = "";
+  };
+
+  const handleChatDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleChatDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleChatDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleChatFileUpload(file);
   };
 
   // Brand colors derived from event type settings
@@ -877,10 +1012,32 @@ export default function BookPage() {
                 <Input
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, email: e.target.value });
+                    if (emailError) setEmailError("");
+                  }}
                   placeholder="you@example.com"
                   data-testid="input-email"
                 />
+                {emailError && (
+                  <p className="text-sm text-destructive mt-1">{emailError}</p>
+                )}
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Phone (optional)</label>
+                <Input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => {
+                    setFormData({ ...formData, phone: e.target.value });
+                    if (phoneError) setPhoneError("");
+                  }}
+                  placeholder="+1 (555) 123-4567"
+                  data-testid="input-phone"
+                />
+                {phoneError && (
+                  <p className="text-sm text-destructive mt-1">{phoneError}</p>
+                )}
               </div>
               <div>
                 <label className="text-sm font-medium mb-1.5 block">Company</label>
@@ -951,68 +1108,212 @@ export default function BookPage() {
               <CardDescription>Help us prepare for your meeting</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <ScrollArea className="h-[300px] pr-4">
-                <div className="space-y-4">
-                  {chatMessages.map((msg, i) => (
-                    <div
-                      key={i}
-                      className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                    >
-                      <div
-                        className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                          msg.role === "user"
-                            ? "text-white"
-                            : "bg-muted"
-                        }`}
-                        style={msg.role === "user" ? { backgroundColor: brandPrimary } : undefined}
-                      >
-                        {msg.content}
-                      </div>
+              <div
+                onDragOver={handleChatDragOver}
+                onDragLeave={handleChatDragLeave}
+                onDrop={handleChatDrop}
+                className={`relative ${isDragOver ? "ring-2 rounded-lg" : ""}`}
+                style={isDragOver ? { "--tw-ring-color": brandPrimary } as React.CSSProperties : undefined}
+              >
+                {isDragOver && (
+                  <div
+                    className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 rounded-lg border-2 border-dashed"
+                    style={{ borderColor: brandPrimary }}
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <Upload className="h-8 w-8" style={{ color: brandPrimary }} />
+                      <p className="text-sm font-medium" style={{ color: brandPrimary }}>
+                        Drop file to upload
+                      </p>
                     </div>
-                  ))}
-                  {chatMutation.isPending && (
-                    <div className="flex justify-start">
-                      <div className="bg-muted rounded-lg px-4 py-2">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
+                  </div>
+                )}
+                <ScrollArea className="h-[300px] pr-4">
+                  <div className="space-y-4">
+                    {chatMessages.map((msg, i) => {
+                      const isDocUpload =
+                        msg.role === "user" && msg.content.startsWith("[Document uploaded:");
+                      const docName = isDocUpload
+                        ? msg.content.replace("[Document uploaded: ", "").replace("]", "")
+                        : null;
 
-              <div className="flex gap-2">
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder="Type your response..."
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChatSend()}
-                  disabled={chatMutation.isPending}
-                  data-testid="input-chat"
-                />
-                <Button
-                  onClick={handleChatSend}
-                  disabled={!chatInput.trim() || chatMutation.isPending}
-                  className="text-white"
-                  style={{ backgroundColor: brandPrimary, borderColor: brandPrimary }}
-                  data-testid="button-send"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
+                      return (
+                        <div
+                          key={i}
+                          className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                        >
+                          {isDocUpload ? (
+                            <div
+                              className="max-w-[80%] rounded-lg px-4 py-2 flex items-center gap-2 text-white"
+                              style={{ backgroundColor: brandPrimary }}
+                            >
+                              <FileText className="h-4 w-4 shrink-0" />
+                              <span className="text-sm truncate">{docName}</span>
+                            </div>
+                          ) : (
+                            <div
+                              className={`max-w-[80%] rounded-lg px-4 py-2 ${
+                                msg.role === "user" ? "text-white" : "bg-muted"
+                              }`}
+                              style={msg.role === "user" ? { backgroundColor: brandPrimary } : undefined}
+                            >
+                              {msg.content}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {chatMutation.isPending && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted rounded-lg px-4 py-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
               </div>
 
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => handleBooking()}
-                disabled={bookMutation.isPending}
-                style={{ borderColor: `${brandSecondary}60`, color: brandSecondary }}
-                data-testid="button-skip-book"
-              >
-                {bookMutation.isPending ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : null}
-                Skip & Book Now
-              </Button>
+              {/* Summary Card — shown when AI signals conversation is complete */}
+              {chatComplete && extractedData && (
+                <div
+                  className="rounded-lg border p-4 space-y-3"
+                  style={{ borderColor: `${brandPrimary}40` }}
+                >
+                  <h3 className="font-semibold text-sm" style={{ color: brandPrimary }}>
+                    Here&apos;s what we&apos;ve got:
+                  </h3>
+                  <ul className="space-y-1.5 text-sm">
+                    {extractedData.name && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-muted-foreground min-w-[80px] shrink-0">Name:</span>
+                        <span>{extractedData.name}</span>
+                      </li>
+                    )}
+                    {extractedData.email && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-muted-foreground min-w-[80px] shrink-0">Email:</span>
+                        <span>{extractedData.email}</span>
+                      </li>
+                    )}
+                    {formData.phone && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-muted-foreground min-w-[80px] shrink-0">Phone:</span>
+                        <span>{formData.phone}</span>
+                      </li>
+                    )}
+                    {extractedData.company && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-muted-foreground min-w-[80px] shrink-0">Company:</span>
+                        <span>{extractedData.company}</span>
+                      </li>
+                    )}
+                    {extractedData.summary && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-muted-foreground min-w-[80px] shrink-0">Looking to:</span>
+                        <span>{extractedData.summary}</span>
+                      </li>
+                    )}
+                    {extractedData.timeline && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-muted-foreground min-w-[80px] shrink-0">Timeline:</span>
+                        <span>{extractedData.timeline}</span>
+                      </li>
+                    )}
+                    {extractedData.documents && extractedData.documents.length > 0 && (
+                      <li className="flex items-start gap-2">
+                        <span className="text-muted-foreground min-w-[80px] shrink-0">Documents:</span>
+                        <span>{extractedData.documents.join(", ")}</span>
+                      </li>
+                    )}
+                  </ul>
+                  <div className="flex gap-2 pt-2">
+                    <Button
+                      className="flex-1 text-white"
+                      onClick={() => handleBooking()}
+                      disabled={bookMutation.isPending}
+                      style={{ backgroundColor: brandPrimary, borderColor: brandPrimary }}
+                      data-testid="button-confirm-booking"
+                    >
+                      {bookMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4 mr-2" />
+                      )}
+                      Confirm Booking
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setChatComplete(false);
+                        setExtractedData(null);
+                        setStep("info");
+                      }}
+                      style={{ borderColor: `${brandSecondary}60`, color: brandSecondary }}
+                      data-testid="button-edit"
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Chat input — hidden when conversation is complete */}
+              {!chatComplete && (
+                <>
+                  <div className="flex gap-2">
+                    <input
+                      ref={chatFileInputRef}
+                      type="file"
+                      className="hidden"
+                      accept={ACCEPTED_FILE_TYPES.join(",")}
+                      onChange={handleChatFileInputChange}
+                      data-testid="input-chat-file"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => chatFileInputRef.current?.click()}
+                      disabled={chatMutation.isPending}
+                      className="shrink-0"
+                      data-testid="button-chat-upload"
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </Button>
+                    <Input
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Type your response..."
+                      onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChatSend()}
+                      disabled={chatMutation.isPending}
+                      data-testid="input-chat"
+                    />
+                    <Button
+                      onClick={handleChatSend}
+                      disabled={!chatInput.trim() || chatMutation.isPending}
+                      className="text-white"
+                      style={{ backgroundColor: brandPrimary, borderColor: brandPrimary }}
+                      data-testid="button-send"
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => handleBooking()}
+                    disabled={bookMutation.isPending}
+                    style={{ borderColor: `${brandSecondary}60`, color: brandSecondary }}
+                    data-testid="button-skip-book"
+                  >
+                    {bookMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : null}
+                    Skip & Book Now
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
         )}

@@ -136,15 +136,15 @@ ALTER TABLE bookings ADD COLUMN guest_phone TEXT;
 
 ## Acceptance Criteria
 
-- [ ] Optional phone number field with validation in booking info form
-- [ ] Phone number stored on booking record and displayed in dashboard
-- [ ] File upload button available within the chat interface
-- [ ] Uploaded documents shown as chat bubbles and included in booking
-- [ ] AI presents a summary of collected information before final booking
-- [ ] Booker can review and confirm or go back to edit from summary
-- [ ] AI uses custom questions from event type configuration
-- [ ] If no custom questions, AI asks general qualifying questions
-- [ ] Chat handles gracefully if AI service is unavailable
+- [x] Optional phone number field with validation in booking info form
+- [x] Phone number stored on booking record and displayed in dashboard
+- [x] File upload button available within the chat interface
+- [x] Uploaded documents shown as chat bubbles and included in booking
+- [x] AI presents a summary of collected information before final booking
+- [x] Booker can review and confirm or go back to edit from summary
+- [x] AI uses custom questions from event type configuration
+- [x] If no custom questions, AI asks general qualifying questions
+- [x] Chat handles gracefully if AI service is unavailable
 
 ---
 
@@ -167,3 +167,41 @@ ALTER TABLE bookings ADD COLUMN guest_phone TEXT;
 - **Guest timezone is now validated and available in the booking flow.** F06 implemented `isValidTimezone()` to validate IANA timezone strings and stores the validated `guestTimezone` on booking records. The pre-qual chat has access to accurate timezone context, which can be referenced in AI conversation (e.g., confirming the guest's local time during the chat).
 - **Booking endpoint validates `startTimeUTC` for safe time handling.** F06 added a `startTimeUTC` parameter to the booking endpoint with server-side validation (valid date, not in past, within 365-day window). When F07's R3 (AI Summary Before Confirming) displays booking details, it can rely on UTC timestamps for accurate time display regardless of timezone.
 - **Server-side timezone conversion available.** F06's `calculateAvailability()` now performs server-side timezone conversion using native `Intl.DateTimeFormat`. If the pre-qual chat flow needs to reference or display available times conversationally, it can leverage these UTC timestamps for consistent time handling.
+
+---
+
+## Implementation Notes (Post-F07)
+
+**Implemented:** January 27, 2026
+
+### What Was Delivered
+
+All five requirements (R1–R5) were implemented, plus additional improvements:
+
+- **R1: Phone Number Field** — Optional phone on the booking info form with `phoneRegex` validation in `shared/schema.ts`. Stored as `guestPhone` column on the `bookings` table. Displayed on booking detail page (with `tel:` link) and bookings list.
+- **R2: Document Upload in Chat** — Paperclip button and drag-and-drop in the chat interface. File validation enforces allowed types (PDF, DOC, DOCX, images) and max size. Uploaded documents appear as badge-style chat bubbles. AI acknowledges each upload.
+- **R3: AI Summary Card** — After the AI signals `complete: true`, a structured summary card is rendered with `extractedData` fields: name, email, company, summary, keyPoints, timeline, documents. Includes Confirm and Edit buttons.
+- **R4: Host Name Personalization** — AI greeting uses the host's first name from the database via a server-side lookup on the chat route. The host name is not client-provided, preventing spoofing.
+- **R5: Custom Questions + Fallback** — AI uses custom questions from the event type configuration. If no custom questions are configured, it falls back to 3 default qualifying questions.
+
+### Additional Improvements
+
+- **Client-side email validation** — Deferred from F05, implemented alongside phone validation for consistency on the info form.
+- **53 new tests** — Phone validation, AI service behavior, Zod schema validation, summary card structure (`server/__tests__/f07-prequal-enhancements.test.ts`).
+- **Security hardening** — All inputs validated via Zod schemas; file type and size validated; no XSS or injection vectors; `hostName` sourced server-side (not from client request body).
+
+### What Was Deferred
+
+- **R4 stretch goal (conversational name/email collection)** — The PRD described AI collecting name and email conversationally instead of via form. This was deferred in favor of the current form-first flow for MVP reliability. The AI chat step still occurs after the info form.
+
+### Files Changed
+
+| File | Changes |
+|------|---------|
+| `shared/schema.ts` | `guestPhone` column, `phoneRegex`, Zod extension |
+| `server/routes.ts` | Phone validation, booking creation, chat route hostName fix |
+| `server/ai-service.ts` | `PrequalExtractedData` interface, structured summary, document ack, hostName, fallback questions, defensive post-processing |
+| `client/src/pages/book.tsx` | Phone field, email validation, chat file upload, summary card, drag & drop |
+| `client/src/pages/booking-detail.tsx` | Phone display with `tel:` link |
+| `client/src/pages/bookings.tsx` | Phone display in list |
+| `server/__tests__/f07-prequal-enhancements.test.ts` | 53 new tests |

@@ -268,29 +268,57 @@ function getDefaultSuggestions(): AvailabilitySuggestions {
   };
 }
 
+export interface PrequalExtractedData {
+  name?: string;
+  email?: string;
+  company?: string;
+  summary?: string;
+  keyPoints?: string[];
+  timeline?: string;
+  documents?: string[];
+  [key: string]: string | string[] | undefined;
+}
+
 export interface ChatResponse {
   response: string;
   complete: boolean;
-  extractedData?: Record<string, string>;
+  extractedData?: PrequalExtractedData;
 }
+
+// Default fallback questions used when no custom questions are configured
+const DEFAULT_PREQUAL_QUESTIONS = [
+  "What are you looking to discuss?",
+  "What's your timeline?",
+  "Is there anything specific you'd like to cover?",
+];
 
 export async function processPrequalChat(
   messages: { role: string; content: string }[],
   eventTypeName: string,
   questions: string[],
-  guestInfo: { name: string; email: string; company?: string }
+  guestInfo: { name: string; email: string; company?: string },
+  hostName?: string
 ): Promise<ChatResponse> {
-  const questionsContext = questions.length > 0
-    ? `The following are the key questions to gather information about:
-${questions.map((q, i) => `${i + 1}. ${q}`).join("\n")}`
-    : "Ask general qualifying questions about their needs and how you can help them.";
+  const effectiveQuestions = questions.length > 0 ? questions : DEFAULT_PREQUAL_QUESTIONS;
+
+  const questionsContext = `The following are the key questions to gather information about:\n${effectiveQuestions.map((q, i) => `${i + 1}. ${q}`).join("\n")}`;
+
+  const hostGreetingInstruction = hostName
+    ? `When greeting the guest for the first time, reference the host by name. For example: "A few quick questions so ${hostName} can prep for your call." Use "${hostName}" naturally in your opening message.`
+    : "When greeting the guest for the first time, use a friendly generic greeting without referencing a specific host name.";
 
   const prompt = `You are a friendly pre-qualification assistant for scheduling meetings. Your goal is to naturally gather information through conversation.
 
 Meeting type: ${eventTypeName}
 Guest: ${guestInfo.name} (${guestInfo.email})${guestInfo.company ? ` from ${guestInfo.company}` : ""}
 
+${hostGreetingInstruction}
+
 ${questionsContext}
+
+Document Uploads:
+- If a guest message contains a document reference in the format "[Document uploaded: filename.ext]", acknowledge the upload naturally (e.g., "Thanks, I've noted that document." or "Got it, I'll make sure that's included.") and continue the conversation.
+- Keep track of all document names mentioned or uploaded during the conversation. Extract the filename from the "[Document uploaded: ...]" pattern.
 
 Conversation so far:
 ${messages.map((m) => `${m.role === "assistant" ? "Assistant" : "Guest"}: ${m.content}`).join("\n")}
@@ -306,8 +334,27 @@ Respond in JSON format:
 {
   "response": "Your next message to the guest",
   "complete": true/false (true if you have enough information to proceed with booking),
-  "extractedData": { "key": "value" } (any relevant data extracted from the conversation)
-}`;
+  "extractedData": {
+    "name": "Guest name (use: ${guestInfo.name})",
+    "email": "Guest email (use: ${guestInfo.email})",
+    "company": "Company name inferred from conversation or email domain, or empty string if unknown",
+    "summary": "1-2 sentence summary of what the booker needs",
+    "keyPoints": ["Key discussion point 1", "Key discussion point 2"],
+    "timeline": "Timeline if mentioned (e.g., 'Next month', 'ASAP', 'Q2'), or empty string if not mentioned",
+    "documents": ["document1.pdf"]
+  }
+}
+
+Important rules for extractedData:
+- Always include extractedData in your response, even when complete is false (provide partial data gathered so far).
+- When complete is true, provide the full structured extractedData with all fields populated.
+- For "name", always use "${guestInfo.name}".
+- For "email", always use "${guestInfo.email}".
+- For "company", infer from the conversation content, the guest's email domain, or their self-introduction. Use an empty string if unknown.
+- For "summary", write a concise 1-2 sentence summary of the booker's needs based on the conversation.
+- For "keyPoints", extract an array of the main discussion topics and requirements mentioned.
+- For "timeline", include only if the guest mentioned a specific timeframe. Use an empty string if not mentioned.
+- For "documents", list filenames of any documents referenced via "[Document uploaded: ...]" patterns. Use an empty array if none.`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -321,15 +368,42 @@ Respond in JSON format:
       return {
         response: "Thanks for the information! You can proceed with booking.",
         complete: true,
+        extractedData: {
+          name: guestInfo.name,
+          email: guestInfo.email,
+          keyPoints: [],
+          documents: [],
+        },
       };
     }
 
-    return JSON.parse(content) as ChatResponse;
+    const parsed = JSON.parse(content) as ChatResponse;
+
+    // Ensure extractedData always contains the guest's known info
+    if (parsed.extractedData) {
+      parsed.extractedData.name = guestInfo.name;
+      parsed.extractedData.email = guestInfo.email;
+    } else if (parsed.complete) {
+      parsed.extractedData = {
+        name: guestInfo.name,
+        email: guestInfo.email,
+        keyPoints: [],
+        documents: [],
+      };
+    }
+
+    return parsed;
   } catch (error) {
     console.error("Chat processing error:", error);
     return {
       response: "Thanks for the information! You can proceed with booking.",
       complete: true,
+      extractedData: {
+        name: guestInfo.name,
+        email: guestInfo.email,
+        keyPoints: [],
+        documents: [],
+      },
     };
   }
 }
