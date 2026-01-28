@@ -1339,6 +1339,225 @@ export async function registerRoutes(
     }
   });
 
+  // Onboarding API
+  app.get("/api/onboarding/draft", requireAuth, async (req, res) => {
+    try {
+      const draft = await storage.getOnboardingDraft(req.user!.id);
+      if (!draft) {
+        // Return default draft if none exists
+        return res.json({
+          step: 1,
+          data: {
+            firstName: req.user!.firstName || "",
+            lastName: req.user!.lastName || "",
+            companyName: req.user!.companyName || "",
+            websiteUrl: req.user!.websiteUrl || "",
+            timezone: req.user!.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+          },
+          aiSuggestions: null,
+        });
+      }
+      res.json(draft);
+    } catch (error) {
+      console.error("Error fetching onboarding draft:", error);
+      res.status(500).json({ error: "Failed to fetch onboarding draft" });
+    }
+  });
+
+  app.patch("/api/onboarding/draft", requireAuth, async (req, res) => {
+    try {
+      const { step, data, aiSuggestions } = req.body;
+      const draft = await storage.upsertOnboardingDraft(req.user!.id, {
+        step,
+        data,
+        aiSuggestions,
+      });
+      res.json(draft);
+    } catch (error) {
+      console.error("Error saving onboarding draft:", error);
+      res.status(500).json({ error: "Failed to save onboarding draft" });
+    }
+  });
+
+  app.post("/api/onboarding/scan-website", requireAuth, async (req, res) => {
+    try {
+      const { url } = req.body;
+      if (!url || typeof url !== "string") {
+        return res.status(400).json({ error: "URL is required" });
+      }
+
+      // Scan the website for business information
+      const result = await scanWebsite(url);
+
+      // If successful, return the extracted data
+      if (result.success && result.data) {
+        return res.json({
+          success: true,
+          data: {
+            businessDescription: result.data.description || "",
+            industry: result.data.industry || "",
+            services: result.data.services || [],
+            headline: result.data.headline || "",
+            brandColor: result.data.brandColor || "#6366f1",
+          },
+        });
+      }
+
+      res.json({ success: false, error: result.error || "Failed to scan website" });
+    } catch (error) {
+      console.error("Error scanning website for onboarding:", error);
+      res.status(500).json({ success: false, error: "Failed to scan website" });
+    }
+  });
+
+  app.post("/api/onboarding/suggest-events", requireAuth, async (req, res) => {
+    try {
+      const { industry, businessDescription } = req.body;
+
+      // Industry-based event type suggestions
+      const industryTemplates: Record<string, { name: string; duration: number; description: string }[]> = {
+        "consulting": [
+          { name: "Discovery Call", duration: 30, description: "Initial conversation to understand your needs and goals" },
+          { name: "Strategy Session", duration: 60, description: "Deep dive into your challenges and develop an action plan" },
+          { name: "Check-in Call", duration: 30, description: "Regular progress review and accountability session" },
+        ],
+        "design": [
+          { name: "Portfolio Review", duration: 30, description: "Walkthrough of my work and design approach" },
+          { name: "Project Kickoff", duration: 45, description: "Align on project goals, timeline, and deliverables" },
+          { name: "Design Critique", duration: 30, description: "Feedback session on work in progress" },
+        ],
+        "coaching": [
+          { name: "Intro Session", duration: 30, description: "Get to know each other and discuss your goals" },
+          { name: "Coaching Call", duration: 60, description: "In-depth coaching session focused on your development" },
+          { name: "Goal Setting", duration: 45, description: "Define and plan your short and long-term objectives" },
+        ],
+        "sales": [
+          { name: "Product Demo", duration: 30, description: "See our product in action and ask questions" },
+          { name: "Discovery Call", duration: 30, description: "Understand your needs and explore how we can help" },
+          { name: "Follow-up", duration: 15, description: "Quick check-in to answer any remaining questions" },
+        ],
+        "healthcare": [
+          { name: "Initial Consultation", duration: 45, description: "Comprehensive first appointment to understand your needs" },
+          { name: "Follow-up Visit", duration: 30, description: "Check on progress and adjust treatment plan" },
+          { name: "Quick Check", duration: 15, description: "Brief appointment for minor concerns" },
+        ],
+        "tech": [
+          { name: "Technical Consultation", duration: 60, description: "In-depth discussion about your technical challenges" },
+          { name: "Code Review", duration: 45, description: "Review your codebase and provide feedback" },
+          { name: "Quick Sync", duration: 15, description: "Brief catch-up on project status" },
+        ],
+        "education": [
+          { name: "Tutoring Session", duration: 60, description: "One-on-one learning session" },
+          { name: "Office Hours", duration: 30, description: "Drop-in time for questions and help" },
+          { name: "Progress Review", duration: 30, description: "Discuss learning progress and next steps" },
+        ],
+        "legal": [
+          { name: "Initial Consultation", duration: 45, description: "Discuss your legal needs and potential representation" },
+          { name: "Case Review", duration: 60, description: "Detailed review of your case and options" },
+          { name: "Document Review", duration: 30, description: "Review and discuss legal documents" },
+        ],
+        "finance": [
+          { name: "Financial Review", duration: 60, description: "Comprehensive review of your financial situation" },
+          { name: "Planning Session", duration: 45, description: "Develop your financial plan and strategy" },
+          { name: "Quick Consultation", duration: 30, description: "Address specific financial questions" },
+        ],
+      };
+
+      // Default suggestions for unknown industries
+      const defaultSuggestions = [
+        { name: "Introduction Call", duration: 30, description: "Get to know each other and discuss your needs" },
+        { name: "Consultation", duration: 60, description: "In-depth session to explore how I can help" },
+        { name: "Quick Chat", duration: 15, description: "Brief conversation for quick questions" },
+      ];
+
+      const normalizedIndustry = industry?.toLowerCase().replace(/[^a-z]/g, "") || "";
+      const suggestions = industryTemplates[normalizedIndustry] || defaultSuggestions;
+
+      res.json({ suggestions });
+    } catch (error) {
+      console.error("Error generating event suggestions:", error);
+      res.status(500).json({ error: "Failed to generate event suggestions" });
+    }
+  });
+
+  app.post("/api/onboarding/complete", requireAuth, async (req, res) => {
+    try {
+      const { data } = req.body;
+      const userId = req.user!.id;
+
+      // Update user profile with onboarding data
+      await storage.updateUser(userId, {
+        firstName: data.firstName || req.user!.firstName,
+        lastName: data.lastName || req.user!.lastName,
+        companyName: data.companyName,
+        websiteUrl: data.websiteUrl,
+        timezone: data.timezone,
+        defaultLogo: data.logo,
+        defaultPrimaryColor: data.brandColor,
+        // New onboarding fields
+        roleTitle: data.roleTitle,
+        businessDescription: data.businessDescription,
+        industry: data.industry,
+        bookingHeadline: data.bookingHeadline,
+        bookingWelcomeMessage: data.bookingWelcomeMessage,
+        onboardingStep: 6, // Mark as completed
+        onboardingCompletedAt: new Date(),
+      });
+
+      // Create event types if provided
+      if (data.eventTypes && Array.isArray(data.eventTypes)) {
+        for (const et of data.eventTypes) {
+          if (et.selected) {
+            // Generate a unique slug
+            const baseSlug = et.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+            let slug = baseSlug;
+            let counter = 1;
+            while (await storage.getEventTypeBySlug(slug)) {
+              slug = `${baseSlug}-${counter}`;
+              counter++;
+            }
+
+            await storage.createEventType({
+              userId,
+              name: et.name,
+              slug,
+              description: et.description,
+              duration: et.duration,
+              color: data.brandColor || "#6366f1",
+              isActive: true,
+            });
+          }
+        }
+      }
+
+      // Save availability rules if provided
+      if (data.weeklyHours) {
+        await storage.upsertAvailabilityRules({
+          userId,
+          timezone: data.timezone || "UTC",
+          weeklyHours: data.weeklyHours,
+          minNotice: data.minNotice || 60,
+          maxAdvance: data.maxAdvance || 30,
+        });
+      }
+
+      // Delete the onboarding draft
+      await storage.deleteOnboardingDraft(userId);
+
+      // Get updated user
+      const updatedUser = await storage.getUser(userId);
+
+      res.json({
+        success: true,
+        user: updatedUser,
+        message: "Onboarding completed successfully",
+      });
+    } catch (error) {
+      console.error("Error completing onboarding:", error);
+      res.status(500).json({ error: "Failed to complete onboarding" });
+    }
+  });
+
   // AI-Assisted Event Type Creation (F04)
   app.post("/api/ai/create-event-type", requireAuth, async (req, res) => {
     try {

@@ -24,6 +24,7 @@ import BookPage from "@/pages/book";
 import CancelBookingPage from "@/pages/cancel-booking";
 import RescheduleBookingPage from "@/pages/reschedule-booking";
 import OnboardingPage from "@/pages/onboarding";
+import OnboardingWizardPage from "@/pages/onboarding-wizard";
 import EventTypeAICreatePage from "@/pages/event-type-ai-create";
 
 function AuthenticatedLayout({ children }: { children: React.ReactNode }) {
@@ -122,7 +123,23 @@ function AppContent() {
 
   // Onboarding page renders outside sidebar layout but requires auth
   if (window.location.pathname === "/onboarding") {
+    return <OnboardingWizardPage />;
+  }
+
+  // Legacy onboarding (availability setup) - keep for backward compatibility
+  if (window.location.pathname === "/onboarding/availability") {
     return <OnboardingPage />;
+  }
+
+  // Redirect new users to onboarding if they haven't completed it
+  // Check if user has completed onboarding (onboardingCompletedAt is set)
+  const hasCompletedOnboarding = user?.onboardingCompletedAt;
+  if (!hasCompletedOnboarding && window.location.pathname !== "/onboarding") {
+    // Allow settings page access even if onboarding not complete
+    if (window.location.pathname !== "/settings") {
+      window.location.href = "/onboarding";
+      return null;
+    }
   }
 
   return <AuthenticatedRoutes />;
