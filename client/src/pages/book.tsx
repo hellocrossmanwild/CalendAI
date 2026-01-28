@@ -567,9 +567,9 @@ export default function BookPage() {
     if (file) handleChatFileUpload(file);
   };
 
-  // Brand colors derived from event type settings
-  const brandPrimary = eventType?.primaryColor || eventType?.color || "#6366f1";
-  const brandSecondary = eventType?.secondaryColor || brandPrimary;
+  // Brand colors derived from event type settings, falling back to user defaults
+  const brandPrimary = eventType?.primaryColor || eventType?.host?.defaultPrimaryColor || eventType?.color || "#6366f1";
+  const brandSecondary = eventType?.secondaryColor || eventType?.host?.defaultSecondaryColor || brandPrimary;
 
   // Host display helpers
   const hostInitials = eventType?.host
@@ -805,8 +805,8 @@ export default function BookPage() {
             className="inline-flex h-14 w-14 items-center justify-center rounded-lg mb-4 overflow-hidden"
             style={{ backgroundColor: `${brandPrimary}20`, color: brandPrimary }}
           >
-            {eventType.logo ? (
-              <img src={eventType.logo} alt={eventType.name} className="h-12 w-12 object-contain" />
+            {(eventType.logo || eventType.host?.defaultLogo) ? (
+              <img src={eventType.logo || eventType.host?.defaultLogo || ""} alt={eventType.name} className="h-12 w-12 object-contain" />
             ) : (
               <Calendar className="h-7 w-7" />
             )}
