@@ -1367,6 +1367,22 @@ export async function registerRoutes(
   app.patch("/api/onboarding/draft", requireAuth, async (req, res) => {
     try {
       const { step, data, aiSuggestions } = req.body;
+
+      // Validate step is a valid number between 1 and 6
+      if (step !== undefined && (!Number.isInteger(step) || step < 1 || step > 6)) {
+        return res.status(400).json({ error: "Invalid step: must be between 1 and 6" });
+      }
+
+      // Validate data is an object if provided
+      if (data !== undefined && (typeof data !== "object" || data === null)) {
+        return res.status(400).json({ error: "Invalid data format" });
+      }
+
+      // Limit data size to prevent abuse (100KB max)
+      if (data && JSON.stringify(data).length > 100000) {
+        return res.status(400).json({ error: "Data payload too large" });
+      }
+
       const draft = await storage.upsertOnboardingDraft(req.user!.id, {
         step,
         data,
@@ -1386,24 +1402,36 @@ export async function registerRoutes(
         return res.status(400).json({ error: "URL is required" });
       }
 
+      // Validate URL length to prevent abuse
+      if (url.length > 2048) {
+        return res.status(400).json({ error: "URL too long (max 2048 characters)" });
+      }
+
       // Scan the website for business information
       const result = await scanWebsite(url);
 
-      // If successful, return the extracted data
-      if (result.success && result.data) {
+      // If we extracted any useful data, return it
+      // Note: scanWebsite returns WebsiteScanResult with businessName, description, branding, etc.
+      if (result.businessName || result.description) {
         return res.json({
           success: true,
           data: {
-            businessDescription: result.data.description || "",
-            industry: result.data.industry || "",
-            services: result.data.services || [],
-            headline: result.data.headline || "",
-            brandColor: result.data.brandColor || "#6366f1",
+            businessName: result.businessName || "",
+            businessDescription: result.description || "",
+            industry: "", // Not extracted by scanner - user selects
+            services: [],
+            headline: result.suggestedEventDescription || "",
+            brandColor: result.branding?.primaryColor || "#6366f1",
+            logo: result.branding?.logoUrl || "",
           },
+          warning: result.warning,
         });
       }
 
-      res.json({ success: false, error: result.error || "Failed to scan website" });
+      res.json({
+        success: false,
+        error: result.warning || "Could not extract information from the website"
+      });
     } catch (error) {
       console.error("Error scanning website for onboarding:", error);
       res.status(500).json({ success: false, error: "Failed to scan website" });
@@ -1485,6 +1513,78 @@ export async function registerRoutes(
       const { data } = req.body;
       const userId = req.user!.id;
 
+      // Validate required data
+      if (!data || typeof data !== "object") {
+        return res.status(400).json({ error: "Data is required" });
+      }
+
+      // Validate required fields
+      if (!data.firstName?.trim()) {
+        return res.status(400).json({ error: "First name is required" });
+      }
+
+      // Validate timezone if provided
+      if (data.timezone && !isValidTimezone(data.timezone)) {
+        return res.status(400).json({ error: "Invalid timezone" });
+      }
+
+      // Validate event types array limits
+      if (data.eventTypes && Array.isArray(data.eventTypes)) {
+        if (data.eventTypes.length > 50) {
+          return res.status(400).json({ error: "Maximum 50 event types allowed" });
+        }
+        for (const et of data.eventTypes) {
+          if (et.selected) {
+            if (!et.name?.trim() || et.name.length > 100) {
+              return res.status(400).json({ error: "Event type name is required and must be under 100 characters" });
+            }
+            if (!Number.isInteger(et.duration) || et.duration < 5 || et.duration > 480) {
+              return res.status(400).json({ error: "Event type duration must be between 5 and 480 minutes" });
+            }
+          }
+        }
+      }
+
+      // Validate field lengths
+      if (data.companyName && data.companyName.length > 200) {
+        return res.status(400).json({ error: "Company name must be under 200 characters" });
+      }
+      if (data.businessDescription && data.businessDescription.length > 1000) {
+        return res.status(400).json({ error: "Business description must be under 1000 characters" });
+      }
+
+      // Validate color format if provided
+      if (data.brandColor && !/^#[0-9A-Fa-f]{6}$/.test(data.brandColor)) {
+        return res.status(400).json({ error: "Invalid brand color format. Use hex format like #6366f1" });
+      }
+
+      // Check if user already completed onboarding (idempotency)
+      const existingUser = await storage.getUser(userId);
+      if (existingUser?.onboardingCompletedAt) {
+        // Allow re-running but don't create duplicate event types
+        // Just update profile and return success
+        await storage.updateUser(userId, {
+          firstName: data.firstName || existingUser.firstName,
+          lastName: data.lastName || existingUser.lastName,
+          companyName: data.companyName,
+          websiteUrl: data.websiteUrl,
+          timezone: data.timezone || existingUser.timezone,
+          defaultLogo: data.logo,
+          defaultPrimaryColor: data.brandColor,
+          roleTitle: data.roleTitle,
+          businessDescription: data.businessDescription,
+          industry: data.industry,
+          bookingHeadline: data.bookingHeadline,
+          bookingWelcomeMessage: data.bookingWelcomeMessage,
+        });
+        const updatedUser = await storage.getUser(userId);
+        return res.json({
+          success: true,
+          user: updatedUser,
+          message: "Profile updated successfully",
+        });
+      }
+
       // Update user profile with onboarding data
       await storage.updateUser(userId, {
         firstName: data.firstName || req.user!.firstName,
@@ -1506,13 +1606,19 @@ export async function registerRoutes(
 
       // Create event types if provided
       if (data.eventTypes && Array.isArray(data.eventTypes)) {
+        // Get existing slugs upfront to avoid N+1 queries
+        const existingEventTypes = await storage.getEventTypes(userId);
+        const existingSlugs = new Set(existingEventTypes.map(et => et.slug));
+
         for (const et of data.eventTypes) {
           if (et.selected) {
             // Generate a unique slug
-            const baseSlug = et.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+            const baseSlug = et.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || "meeting";
             let slug = baseSlug;
             let counter = 1;
-            while (await storage.getEventTypeBySlug(slug)) {
+
+            // Check against our local set first, then database
+            while (existingSlugs.has(slug)) {
               slug = `${baseSlug}-${counter}`;
               counter++;
             }
@@ -1521,11 +1627,13 @@ export async function registerRoutes(
               userId,
               name: et.name,
               slug,
-              description: et.description,
+              description: et.description || "",
               duration: et.duration,
               color: data.brandColor || "#6366f1",
               isActive: true,
             });
+
+            existingSlugs.add(slug);
           }
         }
       }
@@ -1536,8 +1644,8 @@ export async function registerRoutes(
           userId,
           timezone: data.timezone || "UTC",
           weeklyHours: data.weeklyHours,
-          minNotice: data.minNotice || 60,
-          maxAdvance: data.maxAdvance || 30,
+          minNotice: data.minNotice ?? 60,
+          maxAdvance: data.maxAdvance ?? 30,
         });
       }
 

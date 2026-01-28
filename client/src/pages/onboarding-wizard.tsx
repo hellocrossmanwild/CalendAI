@@ -409,9 +409,24 @@ export default function OnboardingWizardPage() {
       if (result.suggestions) {
         setData((prev) => ({
           ...prev,
-          eventTypes: result.suggestions.map((s: any) => ({ ...s, selected: true })),
+          eventTypes: result.suggestions.map((s: { name: string; duration: number; description: string }) => ({
+            ...s,
+            selected: true,
+          })),
         }));
       }
+    },
+    onError: () => {
+      // Provide default suggestions if API fails
+      toast({ title: "Could not load suggestions", description: "Using default meeting types instead.", variant: "destructive" });
+      setData((prev) => ({
+        ...prev,
+        eventTypes: [
+          { name: "Introduction Call", duration: 30, description: "Get to know each other", selected: true },
+          { name: "Consultation", duration: 60, description: "In-depth discussion", selected: true },
+          { name: "Quick Chat", duration: 15, description: "Brief conversation", selected: true },
+        ],
+      }));
     },
   });
 
@@ -779,8 +794,13 @@ export default function OnboardingWizardPage() {
 
               {/* Industry selection */}
               <div className="space-y-3">
-                <Label>What industry are you in? *</Label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <Label id="industry-label">What industry are you in? *</Label>
+                <div
+                  role="radiogroup"
+                  aria-labelledby="industry-label"
+                  aria-required="true"
+                  className="grid grid-cols-2 sm:grid-cols-4 gap-3"
+                >
                   {INDUSTRIES.map((industry) => {
                     const Icon = industry.icon;
                     const isSelected = data.industry === industry.id;
@@ -788,8 +808,11 @@ export default function OnboardingWizardPage() {
                       <button
                         key={industry.id}
                         type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        aria-label={`Select ${industry.label} as your industry`}
                         onClick={() => updateData({ industry: industry.id })}
-                        className={`p-4 rounded-lg border-2 transition-all text-center ${
+                        className={`p-4 rounded-lg border-2 transition-all text-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
                           isSelected
                             ? "border-primary bg-primary/10"
                             : "border-border hover:border-primary/50"
@@ -799,6 +822,7 @@ export default function OnboardingWizardPage() {
                           className={`h-6 w-6 mx-auto mb-2 ${
                             isSelected ? "text-primary" : "text-muted-foreground"
                           }`}
+                          aria-hidden="true"
                         />
                         <span className={`text-xs ${isSelected ? "font-medium" : ""}`}>
                           {industry.label}
@@ -1171,29 +1195,52 @@ export default function OnboardingWizardPage() {
             <CardContent className="space-y-6">
               {/* Brand color */}
               <div className="space-y-3">
-                <Label>Brand color</Label>
-                <div className="flex flex-wrap gap-3">
-                  {BRAND_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => updateData({ brandColor: color })}
-                      className={`h-10 w-10 rounded-full transition-all ${
-                        data.brandColor === color ? "ring-2 ring-offset-2 ring-primary scale-110" : ""
-                      }`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
+                <Label id="brand-color-label">Brand color</Label>
+                <div
+                  role="radiogroup"
+                  aria-labelledby="brand-color-label"
+                  className="flex flex-wrap gap-3"
+                >
+                  {BRAND_COLORS.map((color) => {
+                    const colorNames: Record<string, string> = {
+                      "#6366f1": "Indigo",
+                      "#8b5cf6": "Violet",
+                      "#ec4899": "Pink",
+                      "#ef4444": "Red",
+                      "#f97316": "Orange",
+                      "#eab308": "Yellow",
+                      "#22c55e": "Green",
+                      "#06b6d4": "Cyan",
+                    };
+                    const colorName = colorNames[color] || color;
+                    const isSelected = data.brandColor === color;
+                    return (
+                      <button
+                        key={color}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        aria-label={`Select ${colorName} as brand color`}
+                        onClick={() => updateData({ brandColor: color })}
+                        className={`h-10 w-10 rounded-full transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary ${
+                          isSelected ? "ring-2 ring-offset-2 ring-primary scale-110" : ""
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    );
+                  })}
                   <div className="relative">
                     <input
                       type="color"
                       value={data.brandColor}
                       onChange={(e) => updateData({ brandColor: e.target.value })}
                       className="absolute inset-0 opacity-0 cursor-pointer"
+                      aria-label="Choose custom brand color"
                     />
                     <div
                       className="h-10 w-10 rounded-full border-2 border-dashed border-muted-foreground flex items-center justify-center"
                       style={{ backgroundColor: data.brandColor }}
+                      aria-hidden="true"
                     >
                       <Plus className="h-4 w-4 text-muted-foreground" />
                     </div>
