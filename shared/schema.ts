@@ -285,6 +285,9 @@ export type EventTypeHost = {
   firstName: string | null;
   lastName: string | null;
   profileImageUrl: string | null;
+  defaultLogo: string | null;
+  defaultPrimaryColor: string | null;
+  defaultSecondaryColor: string | null;
 };
 
 // Event type with host info for public booking pages
