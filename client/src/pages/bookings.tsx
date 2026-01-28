@@ -17,6 +17,8 @@ import {
   Sparkles,
   CheckCircle2,
   AlertTriangle,
+  CalendarClock,
+  MessageSquare,
 } from "lucide-react";
 import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
@@ -50,6 +52,15 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import {
   Tabs,
   TabsList,
   TabsTrigger,
@@ -82,6 +93,12 @@ type DateRangePreset = "all" | "today" | "this-week" | "this-month" | "next-7" |
 type SortOption = "date-desc" | "date-asc" | "name-asc" | "name-desc" | "score-desc" | "score-asc";
 type StatusFilter = "all" | "confirmed" | "completed" | "cancelled" | "no-show";
 
+interface TimeSlot {
+  time: string;
+  available: boolean;
+  utc: string;
+}
+
 export default function BookingsPage() {
   const { toast } = useToast();
   const [search, setSearch] = useState("");
@@ -93,6 +110,13 @@ export default function BookingsPage() {
   const [sortBy, setSortBy] = useState<SortOption>("date-asc");
   const [calendarMonth, setCalendarMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  const [rescheduleId, setRescheduleId] = useState<number | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleSlots, setRescheduleSlots] = useState<TimeSlot[]>([]);
+  const [rescheduleSlotsLoading, setRescheduleSlotsLoading] = useState(false);
+  const [selectedRescheduleTime, setSelectedRescheduleTime] = useState<string | null>(null);
+  const [selectedRescheduleUTC, setSelectedRescheduleUTC] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   const { data: bookings, isLoading } = useQuery<BookingWithDetails[]>({
     queryKey: ["/api/bookings"],
@@ -104,12 +128,13 @@ export default function BookingsPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      return apiRequest("DELETE", `/api/bookings/${id}`);
+      return apiRequest("DELETE", `/api/bookings/${id}`, { reason: cancelReason });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
       toast({ title: "Booking cancelled" });
       setDeleteId(null);
+      setCancelReason("");
     },
   });
 
@@ -152,6 +177,79 @@ export default function BookingsPage() {
       toast({ title: "Failed to generate brief", variant: "destructive" });
     },
   });
+
+  const rescheduleMutation = useMutation({
+    mutationFn: async ({ id, startTimeUTC }: { id: number; startTimeUTC: string }) => {
+      const res = await apiRequest("POST", `/api/bookings/${id}/reschedule`, { startTimeUTC });
+      return res;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+      toast({ title: "Booking rescheduled successfully" });
+      setRescheduleId(null);
+      setRescheduleDate("");
+      setRescheduleSlots([]);
+      setSelectedRescheduleTime(null);
+      setSelectedRescheduleUTC(null);
+    },
+    onError: async (error: any) => {
+      // Handle 409 conflict - time slot no longer available
+      if (error?.status === 409 || error?.message?.includes("409")) {
+        toast({ title: "Time slot no longer available", variant: "destructive" });
+        setSelectedRescheduleTime(null);
+        setSelectedRescheduleUTC(null);
+        // Re-fetch slots
+        if (rescheduleDate && rescheduleId) {
+          const booking = bookings?.find((b) => b.id === rescheduleId);
+          if (booking?.eventType?.slug) {
+            fetchRescheduleSlots(booking.eventType.slug, rescheduleDate);
+          }
+        }
+      } else {
+        toast({ title: "Failed to reschedule booking", variant: "destructive" });
+      }
+    },
+  });
+
+  const fetchRescheduleSlots = async (slug: string, date: string) => {
+    setRescheduleSlotsLoading(true);
+    setSelectedRescheduleTime(null);
+    setSelectedRescheduleUTC(null);
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await fetch(`/api/public/availability/${slug}?date=${date}&timezone=${tz}`);
+      if (res.ok) {
+        const data = await res.json();
+        setRescheduleSlots(data.slots || []);
+      } else {
+        setRescheduleSlots([]);
+        toast({ title: "Failed to load available times", variant: "destructive" });
+      }
+    } catch {
+      setRescheduleSlots([]);
+      toast({ title: "Failed to load available times", variant: "destructive" });
+    } finally {
+      setRescheduleSlotsLoading(false);
+    }
+  };
+
+  const handleRescheduleDateChange = (date: string) => {
+    setRescheduleDate(date);
+    if (!date) {
+      setRescheduleSlots([]);
+      return;
+    }
+    const booking = bookings?.find((b) => b.id === rescheduleId);
+    if (booking?.eventType?.slug) {
+      fetchRescheduleSlots(booking.eventType.slug, date);
+    }
+  };
+
+  const handleConfirmReschedule = () => {
+    if (rescheduleId && selectedRescheduleUTC) {
+      rescheduleMutation.mutate({ id: rescheduleId, startTimeUTC: selectedRescheduleUTC });
+    }
+  };
 
   // Date range filtering helper
   const getDateRangeInterval = (preset: DateRangePreset): { start: Date; end: Date } | null => {
@@ -435,6 +533,22 @@ export default function BookingsPage() {
                       <Mail className="h-4 w-4 mr-2" />
                       Email Guest
                     </DropdownMenuItem>
+
+                    {/* Quick Actions: Reschedule */}
+                    {booking.status !== "cancelled" && (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          setRescheduleId(booking.id);
+                          setRescheduleDate("");
+                          setRescheduleSlots([]);
+                          setSelectedRescheduleTime(null);
+                          setSelectedRescheduleUTC(null);
+                        }}
+                      >
+                        <CalendarClock className="h-4 w-4 mr-2" />
+                        Reschedule
+                      </DropdownMenuItem>
+                    )}
 
                     {/* Status Management: Mark Complete / Mark No-Show (only for confirmed) */}
                     {booking.status === "confirmed" && (
@@ -750,7 +864,7 @@ export default function BookingsPage() {
       )}
 
       {/* Cancel booking confirmation dialog */}
-      <AlertDialog open={deleteId !== null} onOpenChange={() => setDeleteId(null)}>
+      <AlertDialog open={deleteId !== null} onOpenChange={(open) => { if (!open) { setDeleteId(null); setCancelReason(""); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel this booking?</AlertDialogTitle>
@@ -758,6 +872,18 @@ export default function BookingsPage() {
               This will cancel the meeting and notify the guest. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="py-2">
+            <label className="text-sm font-medium flex items-center gap-1.5 mb-2">
+              <MessageSquare className="h-4 w-4" />
+              Cancellation reason (optional)
+            </label>
+            <Textarea
+              placeholder="Let the guest know why this booking is being cancelled..."
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              rows={3}
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-dialog">Keep Booking</AlertDialogCancel>
             <AlertDialogAction
@@ -770,6 +896,122 @@ export default function BookingsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Reschedule booking dialog */}
+      <Dialog
+        open={rescheduleId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRescheduleId(null);
+            setRescheduleDate("");
+            setRescheduleSlots([]);
+            setSelectedRescheduleTime(null);
+            setSelectedRescheduleUTC(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Reschedule Booking</DialogTitle>
+            <DialogDescription>
+              Choose a new date and time for this booking.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Current booking info */}
+          {rescheduleId && (() => {
+            const booking = bookings?.find((b) => b.id === rescheduleId);
+            if (!booking) return null;
+            return (
+              <div className="rounded-lg border p-3 bg-muted/50 space-y-1">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                  {booking.guestName}
+                </div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Clock className="h-4 w-4" />
+                  Currently: {formatBookingDate(booking.startTime)}
+                </div>
+                {booking.eventType && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Calendar className="h-4 w-4" />
+                    {booking.eventType.name}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* Date picker */}
+          <div className="space-y-3">
+            <label className="text-sm font-medium">Select new date</label>
+            <Input
+              type="date"
+              value={rescheduleDate}
+              onChange={(e) => handleRescheduleDateChange(e.target.value)}
+              min={format(new Date(), "yyyy-MM-dd")}
+            />
+          </div>
+
+          {/* Time slots */}
+          {rescheduleDate && (
+            <div className="space-y-3">
+              <label className="text-sm font-medium">Available times</label>
+              {rescheduleSlotsLoading ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {[1, 2, 3, 4, 5, 6].map((i) => (
+                    <Skeleton key={i} className="h-10 w-full" />
+                  ))}
+                </div>
+              ) : rescheduleSlots.filter((s) => s.available).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No available time slots for this date. Please select another date.
+                </p>
+              ) : (
+                <div className="grid grid-cols-3 gap-2 max-h-[200px] overflow-y-auto">
+                  {rescheduleSlots
+                    .filter((s) => s.available)
+                    .map((slot) => (
+                      <Button
+                        key={slot.utc}
+                        variant={selectedRescheduleTime === slot.time ? "default" : "outline"}
+                        size="sm"
+                        className="text-sm"
+                        onClick={() => {
+                          setSelectedRescheduleTime(slot.time);
+                          setSelectedRescheduleUTC(slot.utc);
+                        }}
+                      >
+                        {slot.time}
+                      </Button>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRescheduleId(null);
+                setRescheduleDate("");
+                setRescheduleSlots([]);
+                setSelectedRescheduleTime(null);
+                setSelectedRescheduleUTC(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConfirmReschedule}
+              disabled={!selectedRescheduleUTC || rescheduleMutation.isPending}
+            >
+              {rescheduleMutation.isPending ? "Rescheduling..." : "Confirm Reschedule"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

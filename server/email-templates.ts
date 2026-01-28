@@ -368,6 +368,7 @@ export function cancellationEmailToHost(data: {
   hostTimezone: string;
   cancellationReason?: string | null;
   baseUrl: string;
+  withinNoticePeriod?: boolean;
 }): EmailTemplate {
   const dateStr = formatDateTime(data.startTime, data.hostTimezone);
 
@@ -376,6 +377,13 @@ export function cancellationEmailToHost(data: {
   if (data.cancellationReason) {
     reasonSection = `<p style="margin:12px 0 0;font-size:14px;color:#52525b;">Reason: ${escapeHtml(data.cancellationReason)}</p>`;
     reasonText = `\nReason: ${data.cancellationReason}`;
+  }
+
+  let noticeSection = "";
+  let noticeText = "";
+  if (data.withinNoticePeriod) {
+    noticeSection = `<p style="margin:12px 0 0;font-size:13px;color:#d97706;"><em>Note: This booking was cancelled within the minimum notice period.</em></p>`;
+    noticeText = `\nNote: This booking was cancelled within the minimum notice period.`;
   }
 
   const subject = `Booking Cancelled: ${data.guestName} - ${data.eventTypeName}`;
@@ -391,6 +399,7 @@ export function cancellationEmailToHost(data: {
       </td></tr>
     </table>
     ${reasonSection}
+    ${noticeSection}
   `, `${data.guestName} cancelled their ${data.eventTypeName}`);
 
   const text = `Booking Cancelled
@@ -399,7 +408,7 @@ ${data.guestName} has cancelled their booking.
 
 ${data.eventTypeName}
 Was: ${dateStr}
-${reasonText}`;
+${reasonText}${noticeText}`;
 
   return { subject, html, text };
 }
@@ -658,6 +667,249 @@ ${keyContextText}
 ${docText}
 
 View full details: ${detailsUrl}`;
+
+  return { subject, html, text };
+}
+
+// ---------------------------------------------------------------------------
+// 7. Reschedule Confirmation (to booker)
+// ---------------------------------------------------------------------------
+
+export function rescheduleConfirmationToBooker(params: {
+  guestName: string;
+  eventTypeName: string;
+  oldStartTime: Date;
+  oldEndTime: Date;
+  newStartTime: Date;
+  newEndTime: Date;
+  hostName: string;
+  timezone: string;
+  rescheduleToken?: string;
+  cancelToken?: string;
+  baseUrl: string;
+  withinNoticePeriod?: boolean;
+}): { subject: string; html: string; text: string } {
+  const gName = escapeHtml(params.guestName);
+  const eName = escapeHtml(params.eventTypeName);
+  const hName = escapeHtml(params.hostName);
+  const oldDateStr = formatDateTime(params.oldStartTime, params.timezone);
+  const newDateStr = formatDateTime(params.newStartTime, params.timezone);
+  const newDateOnly = formatDateOnly(params.newStartTime, params.timezone);
+  const newTimeOnly = formatTimeOnly(params.newStartTime, params.timezone);
+  const duration = Math.round((params.newEndTime.getTime() - params.newStartTime.getTime()) / 60000);
+
+  let noticePeriodHtml = "";
+  let noticePeriodText = "";
+  if (params.withinNoticePeriod) {
+    noticePeriodHtml = `
+    <p style="margin:0 0 16px;font-size:13px;color:#eab308;font-weight:500;">Note: This booking was rescheduled within the minimum notice period.</p>`;
+    noticePeriodText = `\nNote: This booking was rescheduled within the minimum notice period.`;
+  }
+
+  // Build reschedule/cancel links
+  let actionLinks = "";
+  let actionLinksText = "";
+  if (params.rescheduleToken || params.cancelToken) {
+    const parts: string[] = [];
+    const textParts: string[] = [];
+    if (params.rescheduleToken) {
+      const url = `${params.baseUrl}/booking/reschedule/${params.rescheduleToken}`;
+      parts.push(`<a href="${escapeHtml(url)}" style="color:#6366f1;text-decoration:underline;">Reschedule Again</a>`);
+      textParts.push(`Reschedule Again: ${url}`);
+    }
+    if (params.cancelToken) {
+      const url = `${params.baseUrl}/booking/cancel/${params.cancelToken}`;
+      parts.push(`<a href="${escapeHtml(url)}" style="color:#ef4444;text-decoration:underline;">Cancel Booking</a>`);
+      textParts.push(`Cancel Booking: ${url}`);
+    }
+    actionLinks = `<p style="margin:16px 0 0;font-size:14px;color:#52525b;">Need to make changes? ${parts.join(" | ")}</p>`;
+    actionLinksText = `\nNeed to make changes?\n${textParts.join("\n")}`;
+  }
+
+  const subject = `Booking Rescheduled: ${params.eventTypeName} with ${params.hostName}`;
+
+  const html = wrapHtml(`
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#18181b;">Booking Rescheduled</h1>
+    <p style="margin:0 0 24px;font-size:15px;color:#52525b;">Hi ${gName}, your booking has been successfully rescheduled.</p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fafafa;border:1px solid #e4e4e7;border-radius:6px;margin-bottom:20px;">
+      <tr><td style="padding:16px;">
+        <p style="margin:0 0 8px;font-size:14px;color:#71717a;text-decoration:line-through;">${oldDateStr}</p>
+        <p style="margin:0 0 12px;font-size:14px;color:#22c55e;font-weight:600;">${newDateStr}</p>
+        <p style="margin:0 0 8px;font-size:14px;color:#52525b;"><strong>${eName}</strong> with ${hName}</p>
+        <p style="margin:0 0 6px;font-size:14px;color:#18181b;">Date: ${newDateOnly}</p>
+        <p style="margin:0 0 6px;font-size:14px;color:#18181b;">Time: ${newTimeOnly}</p>
+        <p style="margin:0;font-size:14px;color:#52525b;">Duration: ${duration} minutes</p>
+      </td></tr>
+    </table>
+
+    ${noticePeriodHtml}
+    <p style="margin:0 0 4px;font-size:14px;color:#52525b;">If you have any questions, please contact ${hName}.</p>
+    ${actionLinks}
+  `, `Your ${params.eventTypeName} with ${params.hostName} has been rescheduled`);
+
+  const text = `Booking Rescheduled
+
+Hi ${params.guestName}, your booking has been successfully rescheduled.
+
+Old time: ${oldDateStr}
+New time: ${newDateStr}
+
+${params.eventTypeName} with ${params.hostName}
+Date: ${newDateOnly}
+Time: ${newTimeOnly}
+Duration: ${duration} minutes
+${noticePeriodText}
+If you have any questions, please contact ${params.hostName}.
+${actionLinksText}`;
+
+  return { subject, html, text };
+}
+
+// ---------------------------------------------------------------------------
+// 8. Reschedule Notification (to host)
+// ---------------------------------------------------------------------------
+
+export function rescheduleNotificationToHost(params: {
+  guestName: string;
+  guestEmail: string;
+  eventTypeName: string;
+  oldStartTime: Date;
+  oldEndTime: Date;
+  newStartTime: Date;
+  newEndTime: Date;
+  hostName: string;
+  timezone: string;
+  bookingId: number;
+  baseUrl: string;
+  withinNoticePeriod?: boolean;
+}): { subject: string; html: string; text: string } {
+  const gName = escapeHtml(params.guestName);
+  const eName = escapeHtml(params.eventTypeName);
+  const oldDateStr = formatDateTime(params.oldStartTime, params.timezone);
+  const newDateStr = formatDateTime(params.newStartTime, params.timezone);
+  const detailsUrl = `${params.baseUrl}/bookings/${params.bookingId}`;
+
+  let noticePeriodHtml = "";
+  let noticePeriodText = "";
+  if (params.withinNoticePeriod) {
+    noticePeriodHtml = `
+    <p style="margin:0 0 16px;font-size:13px;color:#eab308;font-weight:500;">Note: This was rescheduled within the minimum notice period.</p>`;
+    noticePeriodText = `\nNote: This was rescheduled within the minimum notice period.`;
+  }
+
+  const subject = `Booking Rescheduled: ${params.guestName} - ${params.eventTypeName}`;
+
+  const html = wrapHtml(`
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#18181b;">Booking Rescheduled</h1>
+    <p style="margin:0 0 24px;font-size:15px;color:#52525b;">${gName} has rescheduled their ${eName} booking.</p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fafafa;border:1px solid #e4e4e7;border-radius:6px;margin-bottom:20px;">
+      <tr><td style="padding:16px;">
+        <p style="margin:0 0 8px;font-size:14px;color:#52525b;"><strong>${eName}</strong></p>
+        <p style="margin:0 0 6px;font-size:14px;color:#52525b;">Guest: ${gName} (${escapeHtml(params.guestEmail)})</p>
+        <p style="margin:0 0 6px;font-size:14px;color:#71717a;text-decoration:line-through;">${oldDateStr}</p>
+        <p style="margin:0;font-size:14px;color:#22c55e;font-weight:600;">&rarr; ${newDateStr}</p>
+      </td></tr>
+    </table>
+
+    ${noticePeriodHtml}
+    <p style="margin:0;">
+      <a href="${escapeHtml(detailsUrl)}" style="display:inline-block;padding:10px 20px;background-color:#6366f1;color:#ffffff;text-decoration:none;border-radius:6px;font-size:14px;font-weight:500;">View Booking</a>
+    </p>
+  `, `${params.guestName} rescheduled their ${params.eventTypeName}`);
+
+  const text = `Booking Rescheduled
+
+${params.guestName} has rescheduled their ${params.eventTypeName} booking.
+
+${params.eventTypeName}
+Guest: ${params.guestName} (${params.guestEmail})
+Old time: ${oldDateStr}
+New time: ${newDateStr}
+${noticePeriodText}
+View booking: ${detailsUrl}`;
+
+  return { subject, html, text };
+}
+
+// ---------------------------------------------------------------------------
+// 9. Host Reschedule Notification (to booker)
+// ---------------------------------------------------------------------------
+
+export function hostRescheduleNotificationToBooker(params: {
+  guestName: string;
+  eventTypeName: string;
+  oldStartTime: Date;
+  oldEndTime: Date;
+  newStartTime: Date;
+  newEndTime: Date;
+  hostName: string;
+  timezone: string;
+  rescheduleToken?: string;
+  cancelToken?: string;
+  baseUrl: string;
+}): { subject: string; html: string; text: string } {
+  const gName = escapeHtml(params.guestName);
+  const eName = escapeHtml(params.eventTypeName);
+  const hName = escapeHtml(params.hostName);
+  const oldDateStr = formatDateTime(params.oldStartTime, params.timezone);
+  const newDateStr = formatDateTime(params.newStartTime, params.timezone);
+  const newDateOnly = formatDateOnly(params.newStartTime, params.timezone);
+  const newTimeOnly = formatTimeOnly(params.newStartTime, params.timezone);
+  const duration = Math.round((params.newEndTime.getTime() - params.newStartTime.getTime()) / 60000);
+
+  // Build reschedule/cancel links
+  let actionLinks = "";
+  let actionLinksText = "";
+  if (params.rescheduleToken || params.cancelToken) {
+    const parts: string[] = [];
+    const textParts: string[] = [];
+    if (params.rescheduleToken) {
+      const url = `${params.baseUrl}/booking/reschedule/${params.rescheduleToken}`;
+      parts.push(`<a href="${escapeHtml(url)}" style="color:#6366f1;text-decoration:underline;">Reschedule to a different time</a>`);
+      textParts.push(`Reschedule to a different time: ${url}`);
+    }
+    if (params.cancelToken) {
+      const url = `${params.baseUrl}/booking/cancel/${params.cancelToken}`;
+      parts.push(`<a href="${escapeHtml(url)}" style="color:#ef4444;text-decoration:underline;">Cancel booking</a>`);
+      textParts.push(`Cancel booking: ${url}`);
+    }
+    actionLinks = `
+    <p style="margin:16px 0 0;font-size:14px;color:#52525b;">If this doesn't work for you: ${parts.join(" | ")}</p>`;
+    actionLinksText = `\nIf this doesn't work for you:\n${textParts.join("\n")}`;
+  }
+
+  const subject = `Your booking with ${params.hostName} has been rescheduled`;
+
+  const html = wrapHtml(`
+    <h1 style="margin:0 0 8px;font-size:20px;font-weight:600;color:#18181b;">Booking Rescheduled</h1>
+    <p style="margin:0 0 24px;font-size:15px;color:#52525b;">Hi ${gName}, ${hName} has rescheduled your ${eName} from ${oldDateStr} to ${newDateStr}.</p>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fafafa;border:1px solid #e4e4e7;border-radius:6px;margin-bottom:20px;">
+      <tr><td style="padding:16px;">
+        <p style="margin:0 0 8px;font-size:14px;color:#52525b;"><strong>${eName}</strong> with ${hName}</p>
+        <p style="margin:0 0 6px;font-size:14px;color:#18181b;">Date: ${newDateOnly}</p>
+        <p style="margin:0 0 6px;font-size:14px;color:#18181b;">Time: ${newTimeOnly}</p>
+        <p style="margin:0;font-size:14px;color:#52525b;">Duration: ${duration} minutes</p>
+      </td></tr>
+    </table>
+
+    <p style="margin:0 0 4px;font-size:14px;color:#52525b;">If you have any questions, please contact ${hName}.</p>
+    ${actionLinks}
+  `, `${params.hostName} has rescheduled your ${params.eventTypeName}`);
+
+  const text = `Booking Rescheduled
+
+Hi ${params.guestName}, ${params.hostName} has rescheduled your ${params.eventTypeName} from ${oldDateStr} to ${newDateStr}.
+
+${params.eventTypeName} with ${params.hostName}
+Date: ${newDateOnly}
+Time: ${newTimeOnly}
+Duration: ${duration} minutes
+
+If you have any questions, please contact ${params.hostName}.
+${actionLinksText}`;
 
   return { subject, html, text };
 }

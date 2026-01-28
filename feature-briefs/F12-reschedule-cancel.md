@@ -210,17 +210,50 @@ ALTER TABLE bookings ADD COLUMN cancellation_reason TEXT;
 
 ## Acceptance Criteria
 
-- [ ] Unique reschedule and cancel tokens generated for each booking
-- [ ] Booker can cancel via public cancel page using token link
-- [ ] Optional cancellation reason is captured and stored
-- [ ] Booker can reschedule via public reschedule page using token link
-- [ ] Reschedule page shows available times using real availability logic
-- [ ] Host can reschedule from the dashboard via modal
-- [ ] Both parties are notified by email on reschedule and cancel (requires F09)
-- [ ] Google Calendar events are updated/removed on reschedule/cancel (requires F02)
-- [ ] Minimum notice period warning is shown when applicable
-- [ ] Cancelled booking's time slot becomes available again
-- [ ] Edge cases handled: already cancelled, same time, past booking, invalid token
+- [x] Unique reschedule and cancel tokens generated for each booking
+- [x] Booker can cancel via public cancel page using token link
+- [x] Optional cancellation reason is captured and stored
+- [x] Booker can reschedule via public reschedule page using token link
+- [x] Reschedule page shows available times using real availability logic
+- [x] Host can reschedule from the dashboard via modal
+- [x] Both parties are notified by email on reschedule and cancel
+- [x] Google Calendar events are updated/removed on reschedule/cancel
+- [x] Minimum notice period warning is shown when applicable
+- [x] Cancelled booking's time slot becomes available again
+- [x] Edge cases handled: already cancelled, same time, past booking, invalid token
+
+## Implementation Notes (Post-Implementation)
+
+**Files Created:**
+| File | Lines | Purpose |
+|------|-------|---------|
+| `client/src/pages/cancel-booking.tsx` | ~491 | Public cancel page with branded styling, reason textarea, edge case states |
+| `client/src/pages/reschedule-booking.tsx` | ~791 | Public reschedule page with date/time picker, availability fetch, 409 handling |
+
+**Files Modified:**
+| File | Changes |
+|------|---------|
+| `shared/schema.ts` | Added `cancellationReason` text field to bookings table |
+| `server/routes.ts` | Added POST cancel, POST reschedule, GET reschedule availability, POST host reschedule endpoints; enhanced GET cancel/reschedule with full event type + host data; updated DELETE to capture cancellationReason |
+| `server/email-templates.ts` | Added 3 reschedule templates; enhanced `cancellationEmailToHost` with `withinNoticePeriod` |
+| `client/src/App.tsx` | Added routes for `/booking/cancel/:token` and `/booking/reschedule/:token` |
+| `client/src/pages/book.tsx` | Added reschedule/cancel links on confirmation page, stored booking response tokens |
+| `client/src/pages/bookings.tsx` | Added reschedule modal, cancel reason dialog, reschedule mutation |
+| `client/src/pages/booking-detail.tsx` | Added reschedule button + dialog, cancellation reason display |
+
+**New API Endpoints:**
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| POST | `/api/public/booking/cancel/:token` | Public (token) | Booker cancels booking |
+| POST | `/api/public/booking/reschedule/:token` | Public (token) | Booker reschedules booking |
+| GET | `/api/public/booking/reschedule/:token/availability` | Public (token) | Available slots for reschedule |
+| POST | `/api/bookings/:id/reschedule` | Authenticated | Host reschedules booking |
+
+**Cross-Feature Integrations:**
+- **F02 (Calendar):** Delete old + create new Google Calendar event on reschedule
+- **F06 (Availability):** Reuses `calculateAvailability()` and `startTimeUTC` pattern, 409 conflict handling
+- **F09 (Email):** 3 new reschedule email templates, enhanced cancellation template with notice period
+- **F11 (Brief):** Meeting brief deleted on reschedule via `storage.deleteMeetingBrief()`
 
 ---
 

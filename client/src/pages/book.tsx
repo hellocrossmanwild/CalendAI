@@ -149,6 +149,7 @@ export default function BookPage() {
   const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [showTimezoneSelector, setShowTimezoneSelector] = useState(false);
   const timezoneSelectorRef = useRef<HTMLDivElement>(null);
+  const [bookingTokens, setBookingTokens] = useState<{ rescheduleToken?: string; cancelToken?: string } | null>(null);
 
   const { data: eventType, isLoading } = useQuery<EventTypeWithHost>({
     queryKey: ["/api/public/event-types", params?.slug],
@@ -295,9 +296,11 @@ export default function BookPage() {
       chatHistory?: ChatMessage[];
       documents?: { name: string; path: string }[];
     }) => {
-      return apiRequest("POST", "/api/public/book", data);
+      const res = await apiRequest("POST", "/api/public/book", data);
+      return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (data: { rescheduleToken?: string; cancelToken?: string }) => {
+      setBookingTokens({ rescheduleToken: data.rescheduleToken, cancelToken: data.cancelToken });
       setStep("confirm");
       // Notify parent window (widget embed) that booking was confirmed
       sendMessageToParent({
@@ -724,6 +727,37 @@ export default function BookPage() {
                 Open in Google Calendar
               </Button>
             </div>
+
+            {/* Reschedule / Cancel links (F12) */}
+            {bookingTokens && (bookingTokens.rescheduleToken || bookingTokens.cancelToken) && (
+              <div className="pt-4 border-t mt-4">
+                <p className="text-xs text-muted-foreground text-center mb-2">Need to make changes?</p>
+                <div className="flex gap-2 justify-center">
+                  {bookingTokens.rescheduleToken && (
+                    <a
+                      href={`/booking/reschedule/${bookingTokens.rescheduleToken}`}
+                      className="text-xs hover:underline"
+                      style={{ color: brandPrimary }}
+                      data-testid="link-reschedule"
+                    >
+                      Reschedule
+                    </a>
+                  )}
+                  {bookingTokens.rescheduleToken && bookingTokens.cancelToken && (
+                    <span className="text-xs text-muted-foreground">|</span>
+                  )}
+                  {bookingTokens.cancelToken && (
+                    <a
+                      href={`/booking/cancel/${bookingTokens.cancelToken}`}
+                      className="text-xs text-muted-foreground hover:underline hover:text-destructive"
+                      data-testid="link-cancel"
+                    >
+                      Cancel booking
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
