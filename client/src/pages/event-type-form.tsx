@@ -220,7 +220,10 @@ export default function EventTypeFormPage() {
                         {...field}
                         onChange={(e) => {
                           field.onChange(e);
-                          if (!isEditing && !form.getValues("slug")) {
+                          const currentSlug = form.getValues("slug");
+                          const currentName = form.getValues("name");
+                          const expectedSlug = generateSlug(currentName);
+                          if (!isEditing && (!currentSlug || currentSlug === expectedSlug)) {
                             form.setValue("slug", generateSlug(e.target.value));
                           }
                         }}
