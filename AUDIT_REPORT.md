@@ -194,11 +194,11 @@ The CalendAI codebase has matured significantly through ten feature implementati
 | Upcoming bookings list | IMPLEMENTED | Dashboard + bookings page |
 | Booking detail view | IMPLEMENTED | Full detail with enrichment, brief, and status management |
 | Search | IMPLEMENTED | By name, email, company |
-| Reschedule from dashboard | MISSING | Blocked by F12 dependency |
+| Reschedule from dashboard | IMPLEMENTED | F12 added reschedule modal + `POST /api/bookings/:id/reschedule` |
 
 **Additional achievements:** 65 new Vitest tests covering status validation, transitions, filtering, sorting, calendar grouping, and dashboard metrics. Status badges use real `booking.status` field instead of `isPast()` inference. Calendar month view uses CSS grid for full layout control.
 
-**Remaining Gap:** Custom date range picker (from/to) not implemented (only presets). Reschedule blocked by F12. Auto-complete status after meeting end time requires scheduled job. Conversion rate placeholder is R5 stretch goal.
+**Remaining Gap:** Custom date range picker (from/to) not implemented (only presets). Auto-complete status after meeting end time requires scheduled job. Conversion rate placeholder is R5 stretch goal.
 
 ---
 
