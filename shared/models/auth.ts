@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, jsonb, pgTable, serial, timestamp, varchar } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, serial, text, timestamp, varchar } from "drizzle-orm/pg-core";
 
 // Session storage table.
 // (IMPORTANT) This table is mandatory for Replit Auth, don't drop it.
@@ -29,6 +29,14 @@ export const users = pgTable("users", {
   defaultPrimaryColor: varchar("default_primary_color"),
   defaultSecondaryColor: varchar("default_secondary_color"),
   emailVerified: boolean("email_verified").default(false),
+  // Onboarding fields
+  onboardingStep: integer("onboarding_step").default(0),
+  onboardingCompletedAt: timestamp("onboarding_completed_at"),
+  roleTitle: varchar("role_title"), // e.g., "Founder", "Sales Lead", "Coach"
+  businessDescription: varchar("business_description"),
+  industry: varchar("industry"),
+  bookingHeadline: varchar("booking_headline"),
+  bookingWelcomeMessage: varchar("booking_welcome_message"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -63,5 +71,54 @@ export const emailVerificationTokens = pgTable("email_verification_tokens", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Onboarding drafts - temporary state for multi-step onboarding
+export const onboardingDrafts = pgTable("onboarding_drafts", {
+  id: serial("id").primaryKey(),
+  userId: varchar("user_id").notNull().unique(),
+  step: integer("step").default(1),
+  data: jsonb("data").$type<{
+    // Step 1: About You
+    firstName?: string;
+    lastName?: string;
+    roleTitle?: string;
+    companyName?: string;
+    websiteUrl?: string;
+    timezone?: string;
+    // Step 2: Business
+    businessDescription?: string;
+    industry?: string;
+    services?: string[];
+    bookingHeadline?: string;
+    // Step 3: Event Types
+    eventTypes?: {
+      name: string;
+      duration: number;
+      description: string;
+      selected: boolean;
+    }[];
+    // Step 4: Availability
+    weeklyHours?: Record<string, { start: string; end: string }[] | null>;
+    minNotice?: number;
+    maxAdvance?: number;
+    calendarConnected?: boolean;
+    // Step 5: Branding
+    brandColor?: string;
+    logo?: string;
+    bookingWelcomeMessage?: string;
+  }>(),
+  aiSuggestions: jsonb("ai_suggestions").$type<{
+    businessDescription?: string;
+    industry?: string;
+    services?: string[];
+    headline?: string;
+    eventTypes?: { name: string; duration: number; description: string }[];
+    brandColor?: string;
+  }>(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
+export type OnboardingDraft = typeof onboardingDrafts.$inferSelect;
+export type InsertOnboardingDraft = typeof onboardingDrafts.$inferInsert;

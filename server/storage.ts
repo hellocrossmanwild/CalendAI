@@ -32,7 +32,7 @@ import {
   calendarTokens,
   notificationPreferences,
 } from "@shared/schema";
-import { users, passwordResetTokens, magicLinkTokens, emailVerificationTokens } from "@shared/models/auth";
+import { users, passwordResetTokens, magicLinkTokens, emailVerificationTokens, onboardingDrafts, type OnboardingDraft, type InsertOnboardingDraft } from "@shared/models/auth";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -112,6 +112,11 @@ export interface IStorage {
   // Notification preferences
   getNotificationPreferences(userId: string): Promise<NotificationPreferences | undefined>;
   upsertNotificationPreferences(data: InsertNotificationPreferences): Promise<NotificationPreferences>;
+
+  // Onboarding drafts
+  getOnboardingDraft(userId: string): Promise<OnboardingDraft | undefined>;
+  upsertOnboardingDraft(userId: string, data: Partial<InsertOnboardingDraft>): Promise<OnboardingDraft>;
+  deleteOnboardingDraft(userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -596,6 +601,59 @@ export class DatabaseStorage implements IStorage {
       })
       .returning();
     return prefs;
+  }
+
+  // Onboarding drafts
+  async getOnboardingDraft(userId: string): Promise<OnboardingDraft | undefined> {
+    const [draft] = await db
+      .select()
+      .from(onboardingDrafts)
+      .where(eq(onboardingDrafts.userId, userId))
+      .limit(1);
+    return draft;
+  }
+
+  async upsertOnboardingDraft(userId: string, data: Partial<InsertOnboardingDraft>): Promise<OnboardingDraft> {
+    const existing = await this.getOnboardingDraft(userId);
+
+    if (existing) {
+      // Merge the existing data with the new data
+      const mergedData = {
+        ...existing.data,
+        ...(data.data || {}),
+      };
+      const mergedAiSuggestions = {
+        ...existing.aiSuggestions,
+        ...(data.aiSuggestions || {}),
+      };
+
+      const [draft] = await db
+        .update(onboardingDrafts)
+        .set({
+          step: data.step ?? existing.step,
+          data: mergedData,
+          aiSuggestions: mergedAiSuggestions,
+          updatedAt: new Date(),
+        })
+        .where(eq(onboardingDrafts.userId, userId))
+        .returning();
+      return draft;
+    } else {
+      const [draft] = await db
+        .insert(onboardingDrafts)
+        .values({
+          userId,
+          step: data.step ?? 1,
+          data: data.data || {},
+          aiSuggestions: data.aiSuggestions || {},
+        })
+        .returning();
+      return draft;
+    }
+  }
+
+  async deleteOnboardingDraft(userId: string): Promise<void> {
+    await db.delete(onboardingDrafts).where(eq(onboardingDrafts.userId, userId));
   }
 }
 
