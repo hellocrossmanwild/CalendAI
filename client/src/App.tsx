@@ -21,6 +21,8 @@ import LeadsPage from "@/pages/leads";
 import BriefsPage from "@/pages/briefs";
 import SettingsPage from "@/pages/settings";
 import BookPage from "@/pages/book";
+import CancelBookingPage from "@/pages/cancel-booking";
+import RescheduleBookingPage from "@/pages/reschedule-booking";
 import OnboardingPage from "@/pages/onboarding";
 import EventTypeAICreatePage from "@/pages/event-type-ai-create";
 
@@ -89,6 +91,23 @@ function AppContent() {
     return (
       <Switch>
         <Route path="/book/:slug" component={BookPage} />
+      </Switch>
+    );
+  }
+
+  // Public cancel/reschedule booking pages work without auth (F12)
+  if (window.location.pathname.startsWith("/booking/cancel/")) {
+    return (
+      <Switch>
+        <Route path="/booking/cancel/:token" component={CancelBookingPage} />
+      </Switch>
+    );
+  }
+
+  if (window.location.pathname.startsWith("/booking/reschedule/")) {
+    return (
+      <Switch>
+        <Route path="/booking/reschedule/:token" component={RescheduleBookingPage} />
       </Switch>
     );
   }

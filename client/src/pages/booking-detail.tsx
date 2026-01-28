@@ -1,13 +1,15 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, Link } from "wouter";
-import { ArrowLeft, Calendar, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone, TrendingUp, CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { ArrowLeft, Calendar, CalendarClock, Clock, Mail, Building, Globe, FileText, Sparkles, Loader2, ExternalLink, User, Briefcase, MapPin, Phone, TrendingUp, CheckCircle, XCircle, RefreshCw, MessageSquare } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { LeadScoreBadge } from "@/components/lead-score-badge";
@@ -17,6 +19,13 @@ import { format, parseISO } from "date-fns";
 export default function BookingDetailPage() {
   const [, params] = useRoute("/bookings/:id");
   const { toast } = useToast();
+
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleSlots, setRescheduleSlots] = useState<{ time: string; available: boolean; utc: string }[]>([]);
+  const [rescheduleSlotsLoading, setRescheduleSlotsLoading] = useState(false);
+  const [selectedRescheduleTime, setSelectedRescheduleTime] = useState<string | null>(null);
+  const [selectedRescheduleUTC, setSelectedRescheduleUTC] = useState<string | null>(null);
 
   const { data: booking, isLoading } = useQuery<BookingWithDetails>({
     queryKey: ["/api/bookings", params?.id],
@@ -73,6 +82,46 @@ export default function BookingDetailPage() {
     },
     onError: (error: Error) => {
       toast({ title: "Failed to update status", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const fetchRescheduleSlots = async (date: string) => {
+    if (!booking?.eventType?.slug) return;
+    setRescheduleSlotsLoading(true);
+    setSelectedRescheduleTime(null);
+    setSelectedRescheduleUTC(null);
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await fetch(`/api/public/availability/${booking.eventType.slug}?date=${date}&timezone=${tz}`);
+      if (!res.ok) throw new Error("Failed to fetch availability");
+      const data = await res.json();
+      setRescheduleSlots(data.slots || []);
+    } catch {
+      setRescheduleSlots([]);
+    } finally {
+      setRescheduleSlotsLoading(false);
+    }
+  };
+
+  const rescheduleMutation = useMutation({
+    mutationFn: async (data: { startTimeUTC: string }) => {
+      return apiRequest("POST", `/api/bookings/${params?.id}/reschedule`, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings", params?.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/bookings"] });
+      toast({ title: "Booking rescheduled" });
+      setShowReschedule(false);
+    },
+    onError: (error: Error) => {
+      if (error.message.startsWith("409")) {
+        toast({ title: "Time slot no longer available", description: "Please select another time.", variant: "destructive" });
+        if (rescheduleDate && booking?.eventType?.slug) {
+          fetchRescheduleSlots(rescheduleDate);
+        }
+      } else {
+        toast({ title: "Failed to reschedule", description: error.message, variant: "destructive" });
+      }
     },
   });
 
@@ -228,6 +277,19 @@ export default function BookingDetailPage() {
                   <div>
                     <h4 className="text-sm font-medium mb-2">Notes</h4>
                     <p className="text-sm text-muted-foreground">{booking.notes}</p>
+                  </div>
+                </>
+              )}
+
+              {booking.cancellationReason && (
+                <>
+                  <Separator />
+                  <div>
+                    <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4" />
+                      Cancellation Reason
+                    </h4>
+                    <p className="text-sm text-muted-foreground">{booking.cancellationReason}</p>
                   </div>
                 </>
               )}
@@ -451,6 +513,23 @@ export default function BookingDetailPage() {
                   Regenerate Brief
                 </Button>
               )}
+              {booking.status === "confirmed" && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => {
+                    setShowReschedule(true);
+                    setRescheduleDate("");
+                    setRescheduleSlots([]);
+                    setSelectedRescheduleTime(null);
+                    setSelectedRescheduleUTC(null);
+                  }}
+                  data-testid="button-reschedule"
+                >
+                  <CalendarClock className="h-4 w-4 mr-2" />
+                  Reschedule
+                </Button>
+              )}
               {booking.status !== "cancelled" && (
                 <>
                   <Separator />
@@ -523,6 +602,89 @@ export default function BookingDetailPage() {
           )}
         </div>
       </div>
+
+      <Dialog open={showReschedule} onOpenChange={setShowReschedule}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reschedule Booking</DialogTitle>
+            <DialogDescription>
+              Choose a new date and time for the meeting with {booking.guestName}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-sm font-medium mb-1 block">Select Date</label>
+              <Input
+                type="date"
+                value={rescheduleDate}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setRescheduleDate(val);
+                  if (val) fetchRescheduleSlots(val);
+                }}
+                min={format(new Date(), "yyyy-MM-dd")}
+              />
+            </div>
+            {rescheduleSlotsLoading && (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            {!rescheduleSlotsLoading && rescheduleDate && rescheduleSlots.length > 0 && (
+              <div>
+                <label className="text-sm font-medium mb-2 block">Available Times</label>
+                <div className="grid grid-cols-3 gap-2 max-h-56 overflow-y-auto">
+                  {rescheduleSlots
+                    .filter((s) => s.available)
+                    .map((slot) => (
+                      <Button
+                        key={slot.utc}
+                        variant={selectedRescheduleTime === slot.time ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => {
+                          setSelectedRescheduleTime(slot.time);
+                          setSelectedRescheduleUTC(slot.utc);
+                        }}
+                      >
+                        {slot.time}
+                      </Button>
+                    ))}
+                </div>
+              </div>
+            )}
+            {!rescheduleSlotsLoading && rescheduleDate && rescheduleSlots.length > 0 && rescheduleSlots.filter((s) => s.available).length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No available times on this date. Please choose another date.
+              </p>
+            )}
+            {!rescheduleSlotsLoading && rescheduleDate && rescheduleSlots.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No availability found for this date. Please choose another date.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReschedule(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!selectedRescheduleUTC || rescheduleMutation.isPending}
+              onClick={() => {
+                if (selectedRescheduleUTC) {
+                  rescheduleMutation.mutate({ startTimeUTC: selectedRescheduleUTC });
+                }
+              }}
+            >
+              {rescheduleMutation.isPending ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <CalendarClock className="h-4 w-4 mr-2" />
+              )}
+              Confirm Reschedule
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -44,6 +44,7 @@ export const bookings = pgTable("bookings", {
   calendarEventId: text("calendar_event_id"),
   rescheduleToken: text("reschedule_token").unique(),
   cancelToken: text("cancel_token").unique(),
+  cancellationReason: text("cancellation_reason"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 

@@ -8,7 +8,7 @@ import { scanWebsite } from "./website-scanner";
 import { getGoogleAuthUrl, exchangeCodeForTokens, calculateAvailability, createCalendarEvent, deleteCalendarEvent, listUserCalendars, isValidTimezone } from "./calendar-service";
 import { ObjectStorageService } from "./replit_integrations/object_storage/objectStorage";
 import { sendEmail } from "./email-service";
-import { authEmail, bookingConfirmationEmail, hostNotificationEmail, cancellationEmailToBooker, cancellationEmailToHost } from "./email-templates";
+import { authEmail, bookingConfirmationEmail, hostNotificationEmail, cancellationEmailToBooker, cancellationEmailToHost, rescheduleConfirmationToBooker, rescheduleNotificationToHost, hostRescheduleNotificationToBooker } from "./email-templates";
 import { addMinutes } from "date-fns";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
@@ -539,6 +539,10 @@ export async function registerRoutes(
         return res.status(404).json({ error: "Booking not found" });
       }
 
+      // F12 R5: Capture optional cancellation reason from host
+      const { reason } = req.body || {};
+      const sanitizedReason = reason ? String(reason).slice(0, 1000) : null;
+
       // Delete Google Calendar event if one exists
       if (booking.calendarEventId) {
         const deleted = await deleteCalendarEvent(req.user!.id, booking.calendarEventId);
@@ -547,7 +551,11 @@ export async function registerRoutes(
         }
       }
 
-      await storage.deleteBooking(parseInt(req.params.id));
+      // Use updateBooking to set status + reason (instead of deleteBooking which only sets status)
+      await storage.updateBooking(parseInt(req.params.id), {
+        status: "cancelled",
+        cancellationReason: sanitizedReason,
+      });
       res.status(204).send();
 
       // Fire-and-forget: send cancellation emails (F09 R4)
@@ -558,7 +566,7 @@ export async function registerRoutes(
           const host = await storage.getUser(booking.userId);
           const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Host" : "Host";
           const hostTimezone = (await storage.getAvailabilityRules(booking.userId))?.timezone || "UTC";
-          const baseUrl = `${req.protocol}://${req.get("host")}`;
+          const baseUrl = getBaseUrl(req);
 
           // Email to booker
           const bookerTpl = cancellationEmailToBooker({
@@ -585,6 +593,7 @@ export async function registerRoutes(
               startTime: booking.startTime,
               hostTimezone,
               baseUrl,
+              cancellationReason: sanitizedReason || undefined,
             });
             sendEmail({ to: host.email, ...hostTpl }).catch(err =>
               console.error("Failed to send cancellation email to host:", err)
@@ -597,6 +606,135 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error deleting booking:", error);
       res.status(500).json({ error: "Failed to delete booking" });
+    }
+  });
+
+  // Host-initiated reschedule (F12 R4)
+  app.post("/api/bookings/:id/reschedule", requireAuth, async (req, res) => {
+    try {
+      const booking = await storage.getBooking(parseInt(req.params.id));
+      if (!booking || booking.userId !== req.user!.id) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+      if (booking.status === "cancelled") {
+        return res.status(400).json({ error: "Cannot reschedule a cancelled booking" });
+      }
+
+      const { startTimeUTC } = req.body;
+      if (!startTimeUTC) {
+        return res.status(400).json({ error: "New start time is required" });
+      }
+
+      const newStartTime = new Date(startTimeUTC);
+      if (isNaN(newStartTime.getTime())) {
+        return res.status(400).json({ error: "Invalid start time" });
+      }
+
+      const now = new Date();
+      if (newStartTime.getTime() < now.getTime()) {
+        return res.status(400).json({ error: "Cannot reschedule to a time in the past" });
+      }
+
+      if (booking.startTime.getTime() === newStartTime.getTime()) {
+        return res.status(400).json({ error: "Please select a different time" });
+      }
+
+      const eventType = await storage.getEventType(booking.eventTypeId);
+      if (!eventType) {
+        return res.status(404).json({ error: "Event type not found" });
+      }
+
+      const newEndTime = addMinutes(newStartTime, eventType.duration);
+
+      // Double-booking prevention
+      const existingBookings = await storage.getBookingsByDateRange(
+        eventType.userId,
+        newStartTime,
+        newEndTime
+      );
+      const hasConflict = existingBookings.some((b) => {
+        if (b.id === booking.id) return false;
+        return b.startTime < newEndTime && b.endTime > newStartTime;
+      });
+      if (hasConflict) {
+        return res.status(409).json({ error: "This time slot is no longer available" });
+      }
+
+      const oldStartTime = booking.startTime;
+      const oldEndTime = booking.endTime;
+
+      // Update the booking
+      await storage.updateBooking(booking.id, {
+        startTime: newStartTime,
+        endTime: newEndTime,
+      });
+
+      // Update Google Calendar: delete old + create new
+      if (booking.calendarEventId) {
+        deleteCalendarEvent(booking.userId, booking.calendarEventId).catch(err =>
+          console.error(`Failed to delete old calendar event for booking ${booking.id}:`, err)
+        );
+      }
+      (async () => {
+        try {
+          const newCalendarEventId = await createCalendarEvent(
+            eventType.userId,
+            {
+              guestName: booking.guestName,
+              guestEmail: booking.guestEmail,
+              guestCompany: booking.guestCompany,
+              startTime: newStartTime,
+              endTime: newEndTime,
+              timezone: booking.timezone,
+              notes: booking.notes,
+            },
+            eventType.name
+          );
+          if (newCalendarEventId) {
+            await storage.updateBooking(booking.id, { calendarEventId: newCalendarEventId });
+          }
+        } catch (err) {
+          console.error("Failed to create new calendar event for rescheduled booking:", err);
+        }
+      })();
+
+      // Delete meeting brief (F11)
+      storage.deleteMeetingBrief(booking.id).catch(err =>
+        console.error("Failed to delete meeting brief for rescheduled booking:", err)
+      );
+
+      res.json({ success: true, newStartTime, newEndTime });
+
+      // Fire-and-forget: send host-initiated reschedule email to booker
+      (async () => {
+        try {
+          const host = await storage.getUser(booking.userId);
+          const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Host" : "Host";
+          const baseUrl = getBaseUrl(req);
+
+          const bookerTpl = hostRescheduleNotificationToBooker({
+            guestName: booking.guestName,
+            eventTypeName: eventType.name,
+            oldStartTime,
+            oldEndTime,
+            newStartTime,
+            newEndTime,
+            hostName,
+            timezone: booking.timezone,
+            rescheduleToken: booking.rescheduleToken || undefined,
+            cancelToken: booking.cancelToken || undefined,
+            baseUrl,
+          });
+          sendEmail({ to: booking.guestEmail, ...bookerTpl }).catch(err =>
+            console.error("Failed to send host reschedule email to booker:", err)
+          );
+        } catch (err) {
+          console.error("Failed to send host reschedule emails:", err);
+        }
+      })();
+    } catch (error) {
+      console.error("Error rescheduling booking:", error);
+      res.status(500).json({ error: "Failed to reschedule booking" });
     }
   });
 
@@ -1133,45 +1271,385 @@ export async function registerRoutes(
     }
   });
 
-  // Public token-based booking lookup (F09 R3 — scaffolding for F12)
+  // Public token-based booking lookup and management (F12)
   app.get("/api/public/booking/cancel/:token", async (req, res) => {
     try {
       const booking = await storage.getBookingByCancelToken(req.params.token);
-      if (!booking || booking.status === "cancelled") {
-        return res.status(404).json({ error: "Booking not found or already cancelled" });
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
       }
       const eventType = await storage.getEventType(booking.eventTypeId);
+      const host = eventType ? await storage.getUser(eventType.userId) : null;
+      const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Host" : "Host";
       res.json({
         id: booking.id,
         guestName: booking.guestName,
+        guestEmail: booking.guestEmail,
         eventTypeName: eventType?.name || "Meeting",
+        eventTypeSlug: eventType?.slug,
         startTime: booking.startTime,
         endTime: booking.endTime,
         status: booking.status,
+        timezone: booking.timezone,
+        cancellationReason: booking.cancellationReason,
+        hostName,
+        eventType: eventType ? {
+          primaryColor: eventType.primaryColor,
+          secondaryColor: eventType.secondaryColor,
+          color: eventType.color,
+          logo: eventType.logo,
+          duration: eventType.duration,
+          host: host ? { firstName: host.firstName, lastName: host.lastName, profileImageUrl: host.profileImageUrl } : null,
+        } : null,
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to look up booking" });
     }
   });
 
+  // POST cancel: Booker cancels via token link (F12 R2)
+  app.post("/api/public/booking/cancel/:token", async (req, res) => {
+    try {
+      const booking = await storage.getBookingByCancelToken(req.params.token);
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+      if (booking.status === "cancelled") {
+        return res.status(400).json({ error: "This booking has already been cancelled" });
+      }
+
+      const { reason } = req.body || {};
+      const sanitizedReason = reason ? String(reason).slice(0, 1000) : null;
+
+      // Check minimum notice period (soft warning — still allow)
+      const rules = await storage.getAvailabilityRules(booking.userId);
+      const minNotice = rules?.minNotice ?? 1440; // default 24h in minutes
+      const now = new Date();
+      const minutesUntilMeeting = (booking.startTime.getTime() - now.getTime()) / (1000 * 60);
+      const withinNoticePeriod = minutesUntilMeeting < minNotice && minutesUntilMeeting > 0;
+
+      // Cancel the booking
+      await storage.updateBooking(booking.id, {
+        status: "cancelled",
+        cancellationReason: sanitizedReason,
+      });
+
+      // Delete Google Calendar event if one exists
+      if (booking.calendarEventId) {
+        deleteCalendarEvent(booking.userId, booking.calendarEventId).catch(err =>
+          console.error(`Failed to delete calendar event for booking ${booking.id}:`, err)
+        );
+      }
+
+      res.json({ success: true, withinNoticePeriod });
+
+      // Fire-and-forget: send cancellation emails
+      (async () => {
+        try {
+          const eventType = await storage.getEventType(booking.eventTypeId);
+          if (!eventType) return;
+          const host = await storage.getUser(booking.userId);
+          const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Host" : "Host";
+          const hostTimezone = rules?.timezone || "UTC";
+          const baseUrl = getBaseUrl(req);
+
+          // Email to booker
+          const bookerTpl = cancellationEmailToBooker({
+            guestName: booking.guestName,
+            hostName,
+            eventTypeName: eventType.name,
+            startTime: booking.startTime,
+            guestTimezone: booking.timezone,
+            eventTypeSlug: eventType.slug,
+            baseUrl,
+          });
+          sendEmail({ to: booking.guestEmail, ...bookerTpl }).catch(err =>
+            console.error("Failed to send cancellation email to booker:", err)
+          );
+
+          // Email to host (check preferences)
+          const prefs = await storage.getNotificationPreferences(booking.userId);
+          const shouldNotify = prefs?.cancellationEmail !== false;
+          if (shouldNotify && host?.email) {
+            const hostTpl = cancellationEmailToHost({
+              guestName: booking.guestName,
+              hostName,
+              eventTypeName: eventType.name,
+              startTime: booking.startTime,
+              hostTimezone,
+              baseUrl,
+              cancellationReason: sanitizedReason || undefined,
+              withinNoticePeriod,
+            });
+            sendEmail({ to: host.email, ...hostTpl }).catch(err =>
+              console.error("Failed to send cancellation email to host:", err)
+            );
+          }
+        } catch (err) {
+          console.error("Failed to send cancellation emails:", err);
+        }
+      })();
+    } catch (error) {
+      console.error("Error cancelling booking:", error);
+      res.status(500).json({ error: "Failed to cancel booking" });
+    }
+  });
+
   app.get("/api/public/booking/reschedule/:token", async (req, res) => {
     try {
       const booking = await storage.getBookingByRescheduleToken(req.params.token);
-      if (!booking || booking.status === "cancelled") {
-        return res.status(404).json({ error: "Booking not found or cancelled" });
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
       }
       const eventType = await storage.getEventType(booking.eventTypeId);
+      const host = eventType ? await storage.getUser(eventType.userId) : null;
+      const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Host" : "Host";
       res.json({
         id: booking.id,
         guestName: booking.guestName,
+        guestEmail: booking.guestEmail,
         eventTypeName: eventType?.name || "Meeting",
         eventTypeSlug: eventType?.slug,
         startTime: booking.startTime,
         endTime: booking.endTime,
         status: booking.status,
+        timezone: booking.timezone,
+        hostName,
+        duration: eventType?.duration || 30,
+        eventType: eventType ? {
+          primaryColor: eventType.primaryColor,
+          secondaryColor: eventType.secondaryColor,
+          color: eventType.color,
+          logo: eventType.logo,
+          duration: eventType.duration,
+          host: host ? { firstName: host.firstName, lastName: host.lastName, profileImageUrl: host.profileImageUrl } : null,
+        } : null,
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to look up booking" });
+    }
+  });
+
+  // GET reschedule availability: Available slots for rescheduling (F12 R3)
+  app.get("/api/public/booking/reschedule/:token/availability", async (req, res) => {
+    try {
+      const booking = await storage.getBookingByRescheduleToken(req.params.token);
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+      if (booking.status === "cancelled") {
+        return res.status(400).json({ error: "Cannot reschedule a cancelled booking" });
+      }
+
+      const eventType = await storage.getEventType(booking.eventTypeId);
+      if (!eventType) {
+        return res.status(404).json({ error: "Event type not found" });
+      }
+
+      const dateStr = req.query.date as string;
+      const date = dateStr ? new Date(dateStr) : new Date();
+      if (isNaN(date.getTime())) {
+        return res.status(400).json({ error: "Invalid date parameter" });
+      }
+
+      const guestTimezone = req.query.timezone as string | undefined;
+      if (guestTimezone && !isValidTimezone(guestTimezone)) {
+        return res.status(400).json({ error: "Invalid timezone identifier" });
+      }
+
+      const slots = await calculateAvailability(
+        eventType.userId,
+        eventType.id,
+        date,
+        guestTimezone || booking.timezone
+      );
+      res.json(slots);
+    } catch (error) {
+      console.error("Error fetching reschedule availability:", error);
+      res.status(500).json({ error: "Failed to fetch availability" });
+    }
+  });
+
+  // POST reschedule: Booker reschedules via token link (F12 R3)
+  app.post("/api/public/booking/reschedule/:token", async (req, res) => {
+    try {
+      const booking = await storage.getBookingByRescheduleToken(req.params.token);
+      if (!booking) {
+        return res.status(404).json({ error: "Booking not found" });
+      }
+      if (booking.status === "cancelled") {
+        return res.status(400).json({ error: "Cannot reschedule a cancelled booking" });
+      }
+
+      const { startTimeUTC, timezone: clientTimezone } = req.body;
+      if (!startTimeUTC) {
+        return res.status(400).json({ error: "New start time is required" });
+      }
+
+      const newStartTime = new Date(startTimeUTC);
+      if (isNaN(newStartTime.getTime())) {
+        return res.status(400).json({ error: "Invalid start time" });
+      }
+
+      // Validate not in the past
+      const now = new Date();
+      if (newStartTime.getTime() < now.getTime()) {
+        return res.status(400).json({ error: "Cannot reschedule to a time in the past" });
+      }
+
+      // Validate within 365-day window
+      const maxBookingWindow = 365 * 24 * 60 * 60 * 1000;
+      if (newStartTime.getTime() - now.getTime() > maxBookingWindow) {
+        return res.status(400).json({ error: "Booking date is too far in the future" });
+      }
+
+      // Prevent rescheduling to the same time
+      if (booking.startTime.getTime() === newStartTime.getTime()) {
+        return res.status(400).json({ error: "Please select a different time" });
+      }
+
+      const eventType = await storage.getEventType(booking.eventTypeId);
+      if (!eventType) {
+        return res.status(404).json({ error: "Event type not found" });
+      }
+
+      const newEndTime = addMinutes(newStartTime, eventType.duration);
+
+      // Double-booking prevention (same pattern as POST /api/public/book)
+      const existingBookings = await storage.getBookingsByDateRange(
+        eventType.userId,
+        newStartTime,
+        newEndTime
+      );
+      const hasConflict = existingBookings.some((b) => {
+        // Exclude the current booking from conflict check
+        if (b.id === booking.id) return false;
+        return b.startTime < newEndTime && b.endTime > newStartTime;
+      });
+      if (hasConflict) {
+        return res.status(409).json({ error: "This time slot is no longer available" });
+      }
+
+      // Check minimum notice period (soft warning)
+      const rules = await storage.getAvailabilityRules(booking.userId);
+      const minNotice = rules?.minNotice ?? 1440;
+      const minutesUntilNew = (newStartTime.getTime() - now.getTime()) / (1000 * 60);
+      const withinNoticePeriod = minutesUntilNew < minNotice;
+
+      const oldStartTime = booking.startTime;
+      const oldEndTime = booking.endTime;
+
+      // Validate and persist timezone
+      const validatedTimezone = (clientTimezone && isValidTimezone(clientTimezone))
+        ? clientTimezone
+        : booking.timezone;
+
+      // Update the booking
+      await storage.updateBooking(booking.id, {
+        startTime: newStartTime,
+        endTime: newEndTime,
+        timezone: validatedTimezone,
+      });
+
+      // Update Google Calendar: delete old event and create new one
+      if (booking.calendarEventId) {
+        deleteCalendarEvent(booking.userId, booking.calendarEventId).catch(err =>
+          console.error(`Failed to delete old calendar event for booking ${booking.id}:`, err)
+        );
+      }
+      // Create new calendar event (fire-and-forget for response, but persist ID)
+      (async () => {
+        try {
+          const newCalendarEventId = await createCalendarEvent(
+            eventType.userId,
+            {
+              guestName: booking.guestName,
+              guestEmail: booking.guestEmail,
+              guestCompany: booking.guestCompany,
+              startTime: newStartTime,
+              endTime: newEndTime,
+              timezone: validatedTimezone,
+              notes: booking.notes,
+            },
+            eventType.name
+          );
+          if (newCalendarEventId) {
+            await storage.updateBooking(booking.id, { calendarEventId: newCalendarEventId });
+          }
+        } catch (err) {
+          console.error("Failed to create new calendar event for rescheduled booking:", err);
+        }
+      })();
+
+      // Delete and regenerate meeting brief (F11 integration)
+      (async () => {
+        try {
+          await storage.deleteMeetingBrief(booking.id);
+          // Brief will be auto-generated by scheduler if within window,
+          // or can be manually triggered
+        } catch (err) {
+          console.error("Failed to delete meeting brief for rescheduled booking:", err);
+        }
+      })();
+
+      res.json({ success: true, withinNoticePeriod, newStartTime, newEndTime });
+
+      // Fire-and-forget: send reschedule emails
+      (async () => {
+        try {
+          const host = await storage.getUser(booking.userId);
+          const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Host" : "Host";
+          const hostTimezone = rules?.timezone || "UTC";
+          const baseUrl = getBaseUrl(req);
+
+          // Email to booker
+          const bookerTpl = rescheduleConfirmationToBooker({
+            guestName: booking.guestName,
+            eventTypeName: eventType.name,
+            oldStartTime,
+            oldEndTime,
+            newStartTime,
+            newEndTime,
+            hostName,
+            timezone: booking.timezone,
+            rescheduleToken: booking.rescheduleToken || undefined,
+            cancelToken: booking.cancelToken || undefined,
+            baseUrl,
+            withinNoticePeriod,
+          });
+          sendEmail({ to: booking.guestEmail, ...bookerTpl }).catch(err =>
+            console.error("Failed to send reschedule email to booker:", err)
+          );
+
+          // Email to host (check preferences)
+          const prefs = await storage.getNotificationPreferences(booking.userId);
+          const shouldNotify = prefs?.newBookingEmail !== false;
+          if (shouldNotify && host?.email) {
+            const hostTpl = rescheduleNotificationToHost({
+              guestName: booking.guestName,
+              guestEmail: booking.guestEmail,
+              eventTypeName: eventType.name,
+              oldStartTime,
+              oldEndTime,
+              newStartTime,
+              newEndTime,
+              hostName,
+              timezone: hostTimezone,
+              bookingId: booking.id,
+              baseUrl,
+              withinNoticePeriod,
+            });
+            sendEmail({ to: host.email, ...hostTpl }).catch(err =>
+              console.error("Failed to send reschedule email to host:", err)
+            );
+          }
+        } catch (err) {
+          console.error("Failed to send reschedule emails:", err);
+        }
+      })();
+    } catch (error) {
+      console.error("Error rescheduling booking:", error);
+      res.status(500).json({ error: "Failed to reschedule booking" });
     }
   });
 
@@ -1350,7 +1828,7 @@ export async function registerRoutes(
           const host = await storage.getUser(eventType.userId);
           const hostName = host ? [host.firstName, host.lastName].filter(Boolean).join(" ") || "Your host" : "Your host";
           const hostTimezone = (await storage.getAvailabilityRules(eventType.userId))?.timezone || "UTC";
-          const baseUrl = `${req.protocol}://${req.get("host")}`;
+          const baseUrl = getBaseUrl(req);
 
           // 1. Booker confirmation email
           const confirmTpl = bookingConfirmationEmail({

@@ -1,9 +1,9 @@
 # CalendAI PRD Audit Report
 
-**Date:** January 27, 2026
+**Date:** January 28, 2026
 **Auditor:** Claude (automated audit)
 **Scope:** Full feature-by-feature comparison of the CalendAI codebase against the v1.0 PRD
-**Last Updated:** Post-F10 implementation
+**Last Updated:** Post-F12 implementation
 
 ---
 
@@ -11,9 +11,14 @@
 
 The CalendAI codebase has matured significantly through ten feature implementation cycles (F01–F10). Core authentication, Google Calendar integration, AI-assisted availability setup, AI-assisted event type creation, booking page enhancements, date/time selection improvements, conversational pre-qualification enhancements, lead enrichment with scoring, email notifications, and dashboard enhancements are now implemented. The booking flow works end-to-end with real calendar integration, AI-powered pre-qualification with document upload and summary cards, automatic lead enrichment and scoring, meeting briefs, AI-guided event type creation with website scanning and branding extraction, email notifications for bookings, cancellations, and auth flows, and a comprehensive booking management dashboard with filtering, sorting, calendar view, and status management.
 
-**Overall PRD Coverage: ~87%** of MVP requirements are implemented.
+**Overall PRD Coverage: ~93%** of MVP requirements are implemented.
 
 **Key Achievements Since Last Audit:**
+- Meeting prep brief enhancements: automatic generation 1hr before meeting, email delivery, similar booking context, regeneration with force flag, document analysis, read tracking, 108 tests (F11)
+- Reschedule & cancel: public cancel page with reason capture, public reschedule page with date/time picker, host reschedule from dashboard, reschedule email templates (3 new), cancellation reason on host cancel, minimum notice period warnings, Google Calendar delete+create on reschedule, meeting brief deletion on reschedule, confirmation page reschedule/cancel links, 409 conflict handling (F12)
+- Testing infrastructure expanded (Vitest with 421+ backend tests across 10 suites)
+
+**Previous Audit Achievements (F01-F10):**
 - Full email-based authentication with Google OAuth, magic links, and password reset (F01)
 - Real Google Calendar integration with OAuth, event read/write, and availability calculation (F02)
 - AI-assisted availability setup with onboarding wizard and calendar pattern analysis (F03)
@@ -24,7 +29,6 @@ The CalendAI codebase has matured significantly through ten feature implementati
 - Lead enrichment and scoring: deterministic rule-based scoring engine, auto-enrichment on booking creation, pre-qual context in enrichment, score badges across UI, filter/sort by score (F08)
 - Email notifications: Nodemailer SMTP with console fallback, HTML templates for booking confirmation, host notification, cancellation, auth emails (magic link, password reset, verification), reschedule/cancel tokens on bookings, notification preferences UI with per-type toggles, public token-based booking lookup endpoints for F12 (F09)
 - Dashboard enhancements: date range filter, event type filter, sorting, calendar month view, booking trend chart, lead score distribution chart, status management (completed/no-show), quick actions on booking cards, enriched leads count fix (F10)
-- Testing infrastructure expanded (Vitest with 296 backend tests across 8 suites)
 
 ---
 
@@ -198,23 +202,39 @@ The CalendAI codebase has matured significantly through ten feature implementati
 
 ---
 
-### F11: Meeting Prep Brief — ~45% Partial
+### F11: Meeting Prep Brief — ~100% Complete ✅
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Generate prep brief | IMPLEMENTED | AI generates summary, talking points, context |
-| Send via email | MISSING | No email delivery |
-| Auto-generate before meeting | MISSING | No scheduled job |
+| R1: Generate prep brief | IMPLEMENTED | AI generates summary, talking points, key context from enrichment + prequal data |
+| R2: Send via email | IMPLEMENTED | Brief email with HTML template sent to host when brief is generated |
+| R3: Auto-generate before meeting | IMPLEMENTED | Brief scheduler runs every 15 minutes, generates briefs 1-2 hours before meetings |
+| R4: Manual regeneration | IMPLEMENTED | `POST /api/bookings/:id/generate-brief?force=true` deletes and regenerates |
+| R5: Similar booking context | IMPLEMENTED | Finds past bookings from same guest domain, includes context in prompt |
+| R6: Document analysis | IMPLEMENTED | Includes document metadata in brief generation |
+| R7: Read tracking | IMPLEMENTED | `readAt` field, mark as read endpoint, unread count badge |
+
+**Additional achievements:** 108 tests covering scheduler logic, regeneration, document analysis, read tracking, email delivery, error handling. Immediate brief generation for bookings <1hr away.
 
 ---
 
-### F12: Reschedule & Cancel — ~25% Partial
+### F12: Reschedule & Cancel — ~95% Complete ✅
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Host cancel | PARTIAL | Hard delete from dashboard, cancellation emails sent (F09) |
-| Booker reschedule/cancel | SCAFFOLDED | Tokens generated on booking creation (F09), public lookup endpoints exist, actual reschedule/cancel pages pending |
-| Notifications on changes | IMPLEMENTED | Cancellation emails sent to both parties via F09 |
+| R1: Booking tokens | IMPLEMENTED | `rescheduleToken` and `cancelToken` on bookings, generated via `crypto.randomBytes(32)` |
+| R2: Public cancel page | IMPLEMENTED | `/booking/cancel/:token` with reason textarea, branded styling, edge case states |
+| R3: Public reschedule page | IMPLEMENTED | `/booking/reschedule/:token` with date/time picker, availability fetch, 409 conflict handling |
+| R4: Host reschedule from dashboard | IMPLEMENTED | Reschedule modal on bookings page + booking detail, `POST /api/bookings/:id/reschedule` |
+| R5: Cancellation reason | IMPLEMENTED | `cancellationReason` field in schema, captured on both booker and host cancel, displayed on detail page |
+| R6: Minimum notice period | IMPLEMENTED | Soft enforcement with warning in UI and email, reads from availability rules |
+| R7: Edge cases | IMPLEMENTED | Already cancelled, same time, past booking, invalid token, no availability |
+| Calendar event updates | IMPLEMENTED | Delete old + create new Google Calendar event on reschedule |
+| Brief regeneration | IMPLEMENTED | Meeting brief deleted on reschedule (F11 integration) |
+| Reschedule email templates | IMPLEMENTED | 3 new templates: booker confirmation, host notification, host-initiated booker notification |
+| Confirmation page links | IMPLEMENTED | Reschedule/cancel links shown on booking confirmation page |
+
+**Additional achievements:** `cancellationEmailToHost` enhanced with `withinNoticePeriod` notice. Confirmation page shows reschedule/cancel links immediately after booking. Host cancel dialog now captures reason. F12 test suite covers endpoints, templates, edge cases.
 
 ---
 
@@ -236,7 +256,7 @@ The CalendAI codebase has matured significantly through ten feature implementati
 |---|---|---|---|
 | User | `users` | PARTIAL | Missing: `timezone`, `companyName`, `websiteUrl` |
 | Event Type | `event_types` | **COMPLETE** | All fields implemented including `location`, `logo`, `primaryColor`, `secondaryColor`, `questions` |
-| Booking | `bookings` | **COMPLETE** | `guestPhone` (F07), `rescheduleToken`, `cancelToken` (F09) |
+| Booking | `bookings` | **COMPLETE** | `guestPhone` (F07), `rescheduleToken`, `cancelToken` (F09), `cancellationReason` (F12) |
 | Lead Enrichment | `lead_enrichments` | **COMPLETE** | All fields implemented including `leadScore`, `leadScoreLabel`, `leadScoreReasoning` (added in F08) |
 | Availability Rules | `availability_rules` | COMPLETE | Full multi-block weekly hours |
 | Calendar Token | `calendar_tokens` | COMPLETE | Real OAuth with refresh tokens |
@@ -261,8 +281,8 @@ The CalendAI codebase has matured significantly through ten feature implementati
 | **F8:** Lead Enrichment & Scoring | MVP | Complete | ~90% |
 | **F9:** Email Notifications | MVP | Complete | ~85% |
 | **F10:** Booking Dashboard | MVP | Complete | ~90% |
-| **F11:** Meeting Prep Brief | MVP | Partial | ~45% |
-| **F12:** Reschedule & Cancel | MVP | Partial | ~25% |
+| **F11:** Meeting Prep Brief | MVP | Complete | ~100% |
+| **F12:** Reschedule & Cancel | MVP | Complete | ~95% |
 | **F13:** Settings & Config | MVP | Partial | ~45% |
 
 ---
@@ -271,7 +291,7 @@ The CalendAI codebase has matured significantly through ten feature implementati
 
 1. ~~**No email notifications** — The confirmation page claims emails are sent, but `sendEmail()` only logs to console. This is table-stakes for a booking platform.~~ **RESOLVED by F09** — Full email service with Nodemailer SMTP, HTML templates for all booking and auth flows, notification preferences, and reschedule/cancel tokens.
 
-2. **No reschedule/cancel pages for bookers** — Tokens and lookup endpoints are scaffolded (F09), but bookers cannot yet perform reschedule or cancel actions via the links in their email. Requires F12 implementation.
+2. ~~**No reschedule/cancel pages for bookers** — Tokens and lookup endpoints are scaffolded (F09), but bookers cannot yet perform reschedule or cancel actions via the links in their email. Requires F12 implementation.~~ **RESOLVED by F12** — Public cancel page (`/booking/cancel/:token`) and reschedule page (`/booking/reschedule/:token`) fully implemented with branded styling, edge case handling, and email notifications. Host can also reschedule from dashboard.
 
 3. ~~**No lead scoring** — The PRD defines a detailed points-based scoring system. The leads page shows no scores.~~ **RESOLVED by F08** — Deterministic rule-based scoring engine implemented with PRD-defined factors. Score badges displayed across all relevant pages. Filter and sort by score on leads page.
 
@@ -288,7 +308,7 @@ The CalendAI codebase has matured significantly through ten feature implementati
 | Component | Status |
 |---|---|
 | Test framework | Vitest (configured in `vitest.config.ts`) |
-| Backend tests | 296 tests across 8 suites (website-scanner, ai-service, F05 booking page, F06 date/time, F07 prequal enhancements, F08 lead scoring, F09 email notifications, F10 dashboard enhancements) |
+| Backend tests | 421+ tests across 10 suites (website-scanner, ai-service, F05 booking page, F06 date/time, F07 prequal enhancements, F08 lead scoring, F09 email notifications, F10 dashboard enhancements, F11 meeting prep brief, F12 reschedule & cancel) |
 | Frontend tests | Not yet implemented |
 | CI/CD integration | Not configured |
 | Coverage reporting | `@vitest/coverage-v8` installed, not yet in CI |
