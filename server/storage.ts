@@ -41,6 +41,7 @@ export interface IStorage {
   createUser(userData: { email: string; password: string; firstName?: string | null; lastName?: string | null }): Promise<User>;
   updateUser(id: string, data: Partial<UpsertUser>): Promise<User | undefined>;
   upsertUser(user: UpsertUser): Promise<User>;
+  deleteUserAndData(userId: string): Promise<void>;
 
   // Password reset tokens
   createPasswordResetToken(userId: string, token: string, expiresAt: Date): Promise<void>;
@@ -157,6 +158,45 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async deleteUserAndData(userId: string): Promise<void> {
+    // Get all bookings for this user to cascade child records
+    const userBookings = await db.select({ id: bookings.id }).from(bookings).where(eq(bookings.userId, userId));
+    const bookingIds = userBookings.map((b) => b.id);
+
+    if (bookingIds.length > 0) {
+      // Delete booking child records
+      for (const bookingId of bookingIds) {
+        await db.delete(meetingBriefs).where(eq(meetingBriefs.bookingId, bookingId));
+        await db.delete(leadEnrichments).where(eq(leadEnrichments.bookingId, bookingId));
+        await db.delete(prequalResponses).where(eq(prequalResponses.bookingId, bookingId));
+        await db.delete(documents).where(eq(documents.bookingId, bookingId));
+      }
+      // Delete bookings
+      await db.delete(bookings).where(eq(bookings.userId, userId));
+    }
+
+    // Delete event types
+    await db.delete(eventTypes).where(eq(eventTypes.userId, userId));
+
+    // Delete user config records
+    await db.delete(availabilityRules).where(eq(availabilityRules.userId, userId));
+    await db.delete(calendarTokens).where(eq(calendarTokens.userId, userId));
+    await db.delete(notificationPreferences).where(eq(notificationPreferences.userId, userId));
+
+    // Delete auth tokens
+    await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId));
+    await db.delete(emailVerificationTokens).where(eq(emailVerificationTokens.userId, userId));
+
+    // Delete magic link tokens by user's email
+    const [userData] = await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+    if (userData?.email) {
+      await db.delete(magicLinkTokens).where(eq(magicLinkTokens.email, userData.email));
+    }
+
+    // Finally delete the user
+    await db.delete(users).where(eq(users.id, userId));
+  }
+
   async getEventTypes(userId: string): Promise<EventType[]> {
     return db.select().from(eventTypes).where(eq(eventTypes.userId, userId)).orderBy(desc(eventTypes.createdAt));
   }
@@ -180,6 +220,9 @@ export class DatabaseStorage implements IStorage {
         firstName: users.firstName,
         lastName: users.lastName,
         profileImageUrl: users.profileImageUrl,
+        defaultLogo: users.defaultLogo,
+        defaultPrimaryColor: users.defaultPrimaryColor,
+        defaultSecondaryColor: users.defaultSecondaryColor,
       })
       .from(users)
       .where(eq(users.id, eventType.userId))
@@ -191,6 +234,9 @@ export class DatabaseStorage implements IStorage {
         firstName: user?.firstName ?? null,
         lastName: user?.lastName ?? null,
         profileImageUrl: user?.profileImageUrl ?? null,
+        defaultLogo: user?.defaultLogo ?? null,
+        defaultPrimaryColor: user?.defaultPrimaryColor ?? null,
+        defaultSecondaryColor: user?.defaultSecondaryColor ?? null,
       },
     };
   }

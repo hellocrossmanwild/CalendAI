@@ -433,6 +433,155 @@ export async function registerRoutes(
     }
   });
 
+  // F13 R1: Update profile
+  app.patch("/api/auth/profile", requireAuth, async (req, res) => {
+    try {
+      const allowedFields = [
+        "firstName", "lastName", "email", "companyName", "websiteUrl",
+        "timezone", "profileImageUrl", "defaultLogo", "defaultPrimaryColor", "defaultSecondaryColor",
+      ] as const;
+
+      const updates: Record<string, any> = {};
+      for (const field of allowedFields) {
+        if (req.body[field] !== undefined) {
+          updates[field] = req.body[field];
+        }
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ error: "No valid fields to update" });
+      }
+
+      // Validate email if being changed
+      if (updates.email) {
+        if (!isValidEmail(updates.email)) {
+          return res.status(400).json({ error: "Please enter a valid email address" });
+        }
+        // Check uniqueness
+        const existing = await storage.getUserByEmail(updates.email);
+        if (existing && existing.id !== req.user!.id) {
+          return res.status(400).json({ error: "An account with this email already exists" });
+        }
+      }
+
+      // Validate timezone if provided
+      if (updates.timezone && !isValidTimezone(updates.timezone)) {
+        return res.status(400).json({ error: "Invalid timezone" });
+      }
+
+      // Validate color fields as hex if provided
+      const colorFields = ["defaultPrimaryColor", "defaultSecondaryColor"] as const;
+      for (const field of colorFields) {
+        if (updates[field] && updates[field] !== "" && !/^#[0-9a-fA-F]{6}$/.test(updates[field])) {
+          return res.status(400).json({ error: `Invalid color format for ${field}. Use hex format (e.g., #FF5500)` });
+        }
+      }
+
+      // Sanitize text fields (trim, limit length)
+      const textFields = ["firstName", "lastName", "companyName", "websiteUrl"] as const;
+      for (const field of textFields) {
+        if (typeof updates[field] === "string") {
+          updates[field] = updates[field].trim().slice(0, 255);
+        }
+      }
+
+      // Validate image URL fields — reject dangerous schemes
+      const imageUrlFields = ["profileImageUrl", "defaultLogo"] as const;
+      for (const field of imageUrlFields) {
+        if (updates[field] && updates[field] !== "") {
+          const val = String(updates[field]).trim();
+          if (/^(javascript|data|vbscript):/i.test(val)) {
+            return res.status(400).json({ error: `Invalid URL scheme for ${field}` });
+          }
+          updates[field] = val.slice(0, 2048);
+        }
+      }
+
+      const updatedUser = await storage.updateUser(req.user!.id, updates);
+      if (!updatedUser) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const { password, ...safeUser } = updatedUser;
+      res.json(safeUser);
+    } catch (error) {
+      console.error("Profile update error:", error);
+      res.status(500).json({ error: "Failed to update profile" });
+    }
+  });
+
+  // F13 R3: Change password
+  app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+    try {
+      const { currentPassword, newPassword } = req.body;
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: "Current password and new password are required" });
+      }
+
+      const user = await storage.getUser(req.user!.id);
+      if (!user || !user.password) {
+        return res.status(400).json({ error: "Password change is not available for OAuth accounts" });
+      }
+
+      const valid = await bcrypt.compare(currentPassword, user.password);
+      if (!valid) {
+        return res.status(401).json({ error: "Current password is incorrect" });
+      }
+
+      const strength = validatePasswordStrength(newPassword);
+      if (!strength.valid) {
+        return res.status(400).json({ error: strength.message });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await storage.updateUser(req.user!.id, { password: hashedPassword });
+
+      res.json({ success: true, message: "Password changed successfully" });
+    } catch (error) {
+      console.error("Change password error:", error);
+      res.status(500).json({ error: "Failed to change password" });
+    }
+  });
+
+  // F13 R8: Delete account
+  app.delete("/api/auth/account", requireAuth, async (req, res) => {
+    try {
+      const { password } = req.body;
+
+      const user = await storage.getUser(req.user!.id);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Require password confirmation if user has a password (non-OAuth)
+      if (user.password) {
+        if (!password) {
+          return res.status(400).json({ error: "Password is required to delete your account" });
+        }
+        const valid = await bcrypt.compare(password, user.password);
+        if (!valid) {
+          return res.status(401).json({ error: "Incorrect password" });
+        }
+      }
+
+      // Cascade delete all user data
+      await storage.deleteUserAndData(req.user!.id);
+
+      // Destroy session
+      req.session.destroy((err) => {
+        if (err) {
+          console.error("Session destroy error after account deletion:", err);
+        }
+        res.clearCookie("connect.sid");
+        res.json({ success: true, message: "Account deleted successfully" });
+      });
+    } catch (error) {
+      console.error("Account deletion error:", error);
+      res.status(500).json({ error: "Failed to delete account" });
+    }
+  });
+
   // Event Types CRUD
   app.get("/api/event-types", requireAuth, async (req, res) => {
     try {

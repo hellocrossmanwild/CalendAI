@@ -416,6 +416,9 @@ describe("Public API Security — getEventTypeBySlugWithHost", () => {
       firstName: "Jane",
       lastName: "Smith",
       profileImageUrl: "https://example.com/photo.jpg",
+      defaultLogo: null,
+      defaultPrimaryColor: null,
+      defaultSecondaryColor: null,
     });
 
     // Verify no sensitive fields leak through host
@@ -423,6 +426,9 @@ describe("Public API Security — getEventTypeBySlugWithHost", () => {
     expect(hostKeys).toContain("firstName");
     expect(hostKeys).toContain("lastName");
     expect(hostKeys).toContain("profileImageUrl");
+    expect(hostKeys).toContain("defaultLogo");
+    expect(hostKeys).toContain("defaultPrimaryColor");
+    expect(hostKeys).toContain("defaultSecondaryColor");
     expect(hostKeys).not.toContain("id");
     expect(hostKeys).not.toContain("email");
     expect(hostKeys).not.toContain("password");
@@ -430,7 +436,7 @@ describe("Public API Security — getEventTypeBySlugWithHost", () => {
     expect(hostKeys).not.toContain("emailVerified");
     expect(hostKeys).not.toContain("createdAt");
     expect(hostKeys).not.toContain("updatedAt");
-    expect(hostKeys).toHaveLength(3);
+    expect(hostKeys).toHaveLength(6);
   });
 
   it("returns null host fields gracefully when user data is missing", async () => {
@@ -466,6 +472,9 @@ describe("Public API Security — getEventTypeBySlugWithHost", () => {
       firstName: null,
       lastName: null,
       profileImageUrl: null,
+      defaultLogo: null,
+      defaultPrimaryColor: null,
+      defaultSecondaryColor: null,
     });
   });
 

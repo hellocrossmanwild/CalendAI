@@ -216,24 +216,71 @@ PATCH  /api/branding               → Update branding settings
 
 ## Acceptance Criteria
 
-- [ ] User can edit their profile: name, email, company name, website URL
-- [ ] User can upload/change their profile photo
-- [ ] User can set their timezone from a dropdown
-- [ ] User can change their password (with current password verification)
-- [ ] Availability rules are configurable (working hours, days, min notice, max advance)
-- [ ] Notification preferences are configurable (email toggles)
-- [ ] Branding settings allow logo upload and color selection
-- [ ] Event types are listed with quick toggles in settings
-- [ ] Account deletion works with confirmation and cascading data removal
-- [ ] All settings changes are persisted and reflected immediately
+- [x] User can edit their profile: name, email, company name, website URL
+- [x] User can upload/change their profile photo
+- [x] User can set their timezone from a dropdown
+- [x] User can change their password (with current password verification)
+- [x] Availability rules are configurable (working hours, days, min notice, max advance)
+- [x] Notification preferences are configurable (email toggles)
+- [x] Branding settings allow logo upload and color selection
+- [x] Event types are listed with quick toggles in settings
+- [x] Account deletion works with confirmation and cascading data removal
+- [x] All settings changes are persisted and reflected immediately
+
+---
+
+## Implementation Notes (Post-Implementation)
+
+**Implemented:** January 28, 2026
+
+### Schema Changes
+- Added to `users` table in `shared/models/auth.ts`: `companyName`, `websiteUrl`, `timezone` (default "UTC"), `defaultLogo`, `defaultPrimaryColor`, `defaultSecondaryColor`
+- `EventTypeHost` type extended with `defaultLogo`, `defaultPrimaryColor`, `defaultSecondaryColor` for branding cascade
+
+### Backend
+- `PATCH /api/auth/profile` — Updates any combination of: firstName, lastName, email, companyName, websiteUrl, timezone, profileImageUrl, defaultLogo, defaultPrimaryColor, defaultSecondaryColor. Field whitelisting prevents injection of password/id/emailVerified. Email validated, timezone validated via `isValidTimezone()`, colors validated as 6-digit hex, text trimmed to 255 chars, image URLs reject dangerous schemes.
+- `POST /api/auth/change-password` — Verifies current password via bcrypt, validates new password strength, hashes and stores. Returns error for OAuth users (no password set).
+- `DELETE /api/auth/account` — Requires password confirmation for non-OAuth users. Cascade deletes all 13 tables in correct order (children before parents). Destroys session and clears cookie.
+- `getEventTypeBySlugWithHost()` — Now returns user-level branding defaults alongside event type data for cascade logic.
+- `deleteUserAndData()` — New storage method handling cascade across: meetingBriefs, leadEnrichments, prequalResponses, documents, bookings, eventTypes, availabilityRules, calendarTokens, notificationPreferences, passwordResetTokens, emailVerificationTokens, magicLinkTokens, users.
+
+### Frontend
+- `PasswordStrengthIndicator` extracted from `auth.tsx` to `client/src/components/password-strength-indicator.tsx` for reuse
+- Settings page expanded with 5 new sections: editable profile form (with photo upload hover overlay), password change (with show/hide toggles and strength indicator), branding (logo upload + hex color pickers with preview), event type quick-access (list with active/inactive toggles), danger zone (red-bordered card with confirmation dialog)
+- All forms use React Query mutations with loading states, success toasts, and error handling
+
+### Testing
+- 41 new tests in `server/__tests__/f13-settings-configuration.test.ts` covering: profile field whitelisting, email/timezone/color validation, password strength, cascade delete ordering, branding cascade logic, edge cases
+- 2 existing F05 tests updated to include new `EventTypeHost` branding fields
+- Full regression: 596 tests pass across 11 suites
+
+### Security
+- Password hash excluded from all API responses (verified)
+- Field whitelisting prevents privilege escalation via profile update
+- URL scheme validation blocks `javascript:`, `data:`, `vbscript:` on image fields
+- Hex color validation prevents injection via color fields
+- Cascade delete verified complete across all 13 tables
+
+### Decisions Made
+- **Branding stored on users table** (not separate table) — 3 fields doesn't warrant its own table
+- **Email change does not trigger re-verification** — Out of scope, noted as future hardening
+- **Password change does not invalidate other sessions** — Optional per brief, not implemented
+- **No rate limiting** — No infrastructure exists in codebase, noted as future hardening
+- **Settings page kept as single file** — Sections added inline with Card components, consistent with existing pattern
+
+### Cross-Feature Implications
+- **F05 (Booking Page):** `getEventTypeBySlugWithHost()` now includes user branding defaults. Public booking page can cascade: event-type branding > user-default branding > system defaults.
+- **F04 (Event Types):** Branding hierarchy is now event-type > user-default > system-default. Event types with their own logo/colors override user defaults.
+- **F02/F06 (Calendar/Timezone):** User timezone field stored on profile. Availability rules timezone is the authoritative source for slot generation; profile timezone can be synced separately.
+- **F01 (Auth):** Password change and account deletion now integrated into settings. `PasswordStrengthIndicator` shared between auth and settings.
 
 ---
 
 ## Notes
 
-- The settings page will be significantly larger after these changes. Consider using a tabbed or sectioned layout (e.g., sidebar navigation within settings: Profile, Calendar, Availability, Notifications, Branding, Danger Zone).
-- Profile photo upload can reuse the existing file upload infrastructure (presigned URLs to object storage).
-- Timezone is important to get right — it affects availability, calendar events, email times, and dashboard display. Use IANA timezone identifiers (e.g., "America/New_York").
+- The settings page is now ~1300 lines with all sections. A tabbed layout could be considered for future UX improvement.
+- Profile photo upload reuses the existing `useUpload` hook with presigned URLs to object storage.
+- Timezone uses IANA identifiers validated by `isValidTimezone()` from F06. Auto-detection via `Intl.DateTimeFormat().resolvedOptions().timeZone`.
 - The branding settings here set defaults; individual event types can override via F04.
 
 ---

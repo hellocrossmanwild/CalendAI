@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, Link as LinkIcon, Copy, ExternalLink, Loader2, CheckCircle, AlertCircle, User, LogOut, Clock, Plus, Trash2, Bell } from "lucide-react";
+import { Calendar, Link as LinkIcon, Copy, ExternalLink, Loader2, CheckCircle, AlertCircle, User, LogOut, Clock, Plus, Trash2, Bell, Lock, Palette, Layout, AlertTriangle, Upload, Eye, EyeOff } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,9 +10,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useUpload } from "@/hooks/use-upload";
+import { PasswordStrengthIndicator } from "@/components/password-strength-indicator";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useLocation } from "wouter";
 
 // --- Availability types & constants ---
 
@@ -166,7 +170,7 @@ export default function SettingsPage() {
     queryKey: ["/api/calendar/status"],
   });
 
-  const { data: eventTypes } = useQuery<{ slug: string }[]>({
+  const { data: eventTypes } = useQuery<{ id: number; name: string; slug: string; duration: number; isActive: boolean | null }[]>({
     queryKey: ["/api/event-types"],
   });
 
@@ -244,6 +248,111 @@ export default function SettingsPage() {
     },
   });
 
+  // F13: Profile editing state
+  const [, navigate] = useLocation();
+  const [profileFirstName, setProfileFirstName] = useState("");
+  const [profileLastName, setProfileLastName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileCompanyName, setProfileCompanyName] = useState("");
+  const [profileWebsiteUrl, setProfileWebsiteUrl] = useState("");
+  const [profileTimezone, setProfileTimezone] = useState(detectTimezone());
+
+  // F13: Password change state
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+
+  // F13: Branding state
+  const [brandingLogo, setBrandingLogo] = useState("");
+  const [brandingPrimaryColor, setBrandingPrimaryColor] = useState("");
+  const [brandingSecondaryColor, setBrandingSecondaryColor] = useState("");
+
+  // F13: Danger zone state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+
+  // F13: Upload hook for profile photo and branding logo
+  const profilePhotoUpload = useUpload({
+    onSuccess: (response) => {
+      profileUpdateMutation.mutate({ profileImageUrl: response.objectPath });
+    },
+    onError: (error) => {
+      toast({ title: "Failed to upload photo", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const brandingLogoUpload = useUpload({
+    onSuccess: (response) => {
+      setBrandingLogo(response.objectPath);
+    },
+    onError: (error) => {
+      toast({ title: "Failed to upload logo", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // F13: Profile update mutation
+  const profileUpdateMutation = useMutation({
+    mutationFn: async (data: Record<string, any>) => {
+      return apiRequest("PATCH", "/api/auth/profile", data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      toast({ title: "Profile updated" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to update profile", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // F13: Password change mutation
+  const changePasswordMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/auth/change-password", {
+        currentPassword,
+        newPassword,
+      });
+    },
+    onSuccess: () => {
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      toast({ title: "Password changed successfully" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to change password", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // F13: Account deletion mutation
+  const deleteAccountMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("DELETE", "/api/auth/account", { password: deletePassword });
+    },
+    onSuccess: () => {
+      setDeleteDialogOpen(false);
+      toast({ title: "Account deleted" });
+      navigate("/auth");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Failed to delete account", description: error.message, variant: "destructive" });
+    },
+  });
+
+  // F13: Event type toggle mutation
+  const toggleEventTypeMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
+      return apiRequest("PATCH", `/api/event-types/${id}`, { isActive });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/event-types"] });
+    },
+    onError: () => {
+      toast({ title: "Failed to update event type", variant: "destructive" });
+    },
+  });
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("calendar") === "connected") {
@@ -266,6 +375,53 @@ export default function SettingsPage() {
       setMaxAdvance(availabilityRules.maxAdvance ?? 30);
     }
   }, [availabilityRules]);
+
+  // F13: Sync profile state from user data
+  useEffect(() => {
+    if (user) {
+      setProfileFirstName(user.firstName || "");
+      setProfileLastName(user.lastName || "");
+      setProfileEmail(user.email || "");
+      setProfileCompanyName((user as any).companyName || "");
+      setProfileWebsiteUrl((user as any).websiteUrl || "");
+      setProfileTimezone((user as any).timezone || detectTimezone());
+      setBrandingLogo((user as any).defaultLogo || "");
+      setBrandingPrimaryColor((user as any).defaultPrimaryColor || "");
+      setBrandingSecondaryColor((user as any).defaultSecondaryColor || "");
+    }
+  }, [user]);
+
+  const handleProfileSave = () => {
+    profileUpdateMutation.mutate({
+      firstName: profileFirstName,
+      lastName: profileLastName,
+      email: profileEmail,
+      companyName: profileCompanyName,
+      websiteUrl: profileWebsiteUrl,
+      timezone: profileTimezone,
+    });
+  };
+
+  const handleBrandingSave = () => {
+    profileUpdateMutation.mutate({
+      defaultLogo: brandingLogo,
+      defaultPrimaryColor: brandingPrimaryColor,
+      defaultSecondaryColor: brandingSecondaryColor,
+    });
+  };
+
+  const handlePasswordChange = () => {
+    if (newPassword !== confirmPassword) {
+      toast({ title: "Passwords do not match", variant: "destructive" });
+      return;
+    }
+    changePasswordMutation.mutate();
+  };
+
+  // Ensure the profile timezone is always selectable
+  const profileTimezoneOptions = COMMON_TIMEZONES.includes(profileTimezone)
+    ? COMMON_TIMEZONES
+    : [profileTimezone, ...COMMON_TIMEZONES];
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -359,23 +515,129 @@ export default function SettingsPage() {
           </CardTitle>
           <CardDescription>Your account information</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
+          {/* Avatar and logout row */}
           <div className="flex items-center gap-4">
-            <Avatar className="h-16 w-16">
-              <AvatarImage src={user?.profileImageUrl || undefined} />
-              <AvatarFallback className="text-lg">{getInitials()}</AvatarFallback>
-            </Avatar>
+            <div className="relative group">
+              <Avatar className="h-16 w-16">
+                <AvatarImage src={user?.profileImageUrl || undefined} />
+                <AvatarFallback className="text-lg">{getInitials()}</AvatarFallback>
+              </Avatar>
+              <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
+                <Upload className="h-5 w-5 text-white" />
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) profilePhotoUpload.uploadFile(file);
+                  }}
+                  disabled={profilePhotoUpload.isUploading}
+                />
+              </label>
+            </div>
             <div className="flex-1">
               <h3 className="font-semibold text-lg">
                 {user?.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : 'User'}
               </h3>
-              <p className="text-muted-foreground">{user?.email}</p>
+              <p className="text-muted-foreground text-sm">{user?.email}</p>
+              {user?.emailVerified === false && (
+                <Badge variant="secondary" className="mt-1 text-xs">Email not verified</Badge>
+              )}
             </div>
             <Button variant="outline" onClick={() => logout()} data-testid="button-logout">
               <LogOut className="h-4 w-4 mr-2" />
               Log Out
             </Button>
           </div>
+
+          <Separator />
+
+          {/* Editable profile fields */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="profile-first-name" className="text-sm font-medium mb-2 block">First Name</Label>
+              <Input
+                id="profile-first-name"
+                value={profileFirstName}
+                onChange={(e) => setProfileFirstName(e.target.value)}
+                placeholder="First name"
+                data-testid="input-first-name"
+              />
+            </div>
+            <div>
+              <Label htmlFor="profile-last-name" className="text-sm font-medium mb-2 block">Last Name</Label>
+              <Input
+                id="profile-last-name"
+                value={profileLastName}
+                onChange={(e) => setProfileLastName(e.target.value)}
+                placeholder="Last name"
+                data-testid="input-last-name"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label htmlFor="profile-email" className="text-sm font-medium mb-2 block">Email</Label>
+            <Input
+              id="profile-email"
+              type="email"
+              value={profileEmail}
+              onChange={(e) => setProfileEmail(e.target.value)}
+              placeholder="Email address"
+              data-testid="input-email"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="profile-company" className="text-sm font-medium mb-2 block">Company</Label>
+              <Input
+                id="profile-company"
+                value={profileCompanyName}
+                onChange={(e) => setProfileCompanyName(e.target.value)}
+                placeholder="Company name"
+                data-testid="input-company"
+              />
+            </div>
+            <div>
+              <Label htmlFor="profile-website" className="text-sm font-medium mb-2 block">Website</Label>
+              <Input
+                id="profile-website"
+                value={profileWebsiteUrl}
+                onChange={(e) => setProfileWebsiteUrl(e.target.value)}
+                placeholder="https://example.com"
+                data-testid="input-website"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label className="text-sm font-medium mb-2 block">Timezone</Label>
+            <Select value={profileTimezone} onValueChange={setProfileTimezone}>
+              <SelectTrigger data-testid="select-profile-timezone">
+                <SelectValue placeholder="Select timezone" />
+              </SelectTrigger>
+              <SelectContent>
+                {profileTimezoneOptions.map((tz) => (
+                  <SelectItem key={tz} value={tz}>
+                    {tz.replace(/_/g, " ")}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button
+            onClick={handleProfileSave}
+            disabled={profileUpdateMutation.isPending}
+            className="w-full"
+            data-testid="button-save-profile"
+          >
+            {profileUpdateMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Save Profile
+          </Button>
         </CardContent>
       </Card>
 
@@ -783,6 +1045,314 @@ export default function SettingsPage() {
                 updateNotifPrefsMutation.mutate({ dailyDigest: checked })
               }
             />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* F13 R3: Password Change */}
+      <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Lock className="h-5 w-5" />
+              Change Password
+            </CardTitle>
+            <CardDescription>Update your account password</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="current-password" className="text-sm font-medium mb-2 block">Current Password</Label>
+              <div className="relative">
+                <Input
+                  id="current-password"
+                  type={showCurrentPassword ? "text" : "password"}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Enter current password"
+                  data-testid="input-current-password"
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                >
+                  {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="new-password" className="text-sm font-medium mb-2 block">New Password</Label>
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showNewPassword ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password"
+                  data-testid="input-new-password"
+                />
+                <button
+                  type="button"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                >
+                  {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <PasswordStrengthIndicator password={newPassword} />
+            </div>
+
+            <div>
+              <Label htmlFor="confirm-password" className="text-sm font-medium mb-2 block">Confirm New Password</Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                data-testid="input-confirm-password"
+              />
+              {confirmPassword && newPassword !== confirmPassword && (
+                <p className="text-xs text-destructive mt-1">Passwords do not match</p>
+              )}
+            </div>
+
+            <Button
+              onClick={handlePasswordChange}
+              disabled={changePasswordMutation.isPending || !currentPassword || !newPassword || newPassword !== confirmPassword}
+              className="w-full"
+              data-testid="button-change-password"
+            >
+              {changePasswordMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Change Password
+            </Button>
+          </CardContent>
+        </Card>
+
+      {/* F13 R6: Branding Settings */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Palette className="h-5 w-5" />
+            Branding
+          </CardTitle>
+          <CardDescription>Set default branding for your booking pages. Event types can override these.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label className="text-sm font-medium mb-2 block">Logo</Label>
+            <div className="flex items-center gap-4">
+              {brandingLogo && (
+                <img
+                  src={brandingLogo}
+                  alt="Brand logo"
+                  className="h-12 w-12 object-contain rounded border"
+                />
+              )}
+              <div>
+                <Button variant="outline" size="sm" asChild className="cursor-pointer">
+                  <label>
+                    <Upload className="h-4 w-4 mr-2" />
+                    {brandingLogo ? "Change Logo" : "Upload Logo"}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) brandingLogoUpload.uploadFile(file);
+                      }}
+                      disabled={brandingLogoUpload.isUploading}
+                    />
+                  </label>
+                </Button>
+                {brandingLogo && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-2 text-muted-foreground"
+                    onClick={() => setBrandingLogo("")}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="branding-primary" className="text-sm font-medium mb-2 block">Primary Color</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={brandingPrimaryColor || "#6366f1"}
+                  onChange={(e) => setBrandingPrimaryColor(e.target.value)}
+                  className="h-9 w-9 rounded border cursor-pointer"
+                />
+                <Input
+                  id="branding-primary"
+                  value={brandingPrimaryColor}
+                  onChange={(e) => setBrandingPrimaryColor(e.target.value)}
+                  placeholder="#6366f1"
+                  className="font-mono text-sm"
+                  data-testid="input-primary-color"
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="branding-secondary" className="text-sm font-medium mb-2 block">Secondary Color</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={brandingSecondaryColor || "#8b5cf6"}
+                  onChange={(e) => setBrandingSecondaryColor(e.target.value)}
+                  className="h-9 w-9 rounded border cursor-pointer"
+                />
+                <Input
+                  id="branding-secondary"
+                  value={brandingSecondaryColor}
+                  onChange={(e) => setBrandingSecondaryColor(e.target.value)}
+                  placeholder="#8b5cf6"
+                  className="font-mono text-sm"
+                  data-testid="input-secondary-color"
+                />
+              </div>
+            </div>
+          </div>
+
+          <Button
+            onClick={handleBrandingSave}
+            disabled={profileUpdateMutation.isPending}
+            className="w-full"
+            data-testid="button-save-branding"
+          >
+            {profileUpdateMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Save Branding
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* F13 R7: Event Type Quick Access */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Layout className="h-5 w-5" />
+            Event Types
+          </CardTitle>
+          <CardDescription>Manage your event types</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {eventTypes && eventTypes.length > 0 ? (
+            <>
+              {eventTypes.map((et) => (
+                <div key={et.id} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <Switch
+                      checked={et.isActive !== false}
+                      onCheckedChange={(checked) =>
+                        toggleEventTypeMutation.mutate({ id: et.id, isActive: checked })
+                      }
+                      data-testid={`toggle-event-type-${et.id}`}
+                    />
+                    <div>
+                      <p className="text-sm font-medium">{et.name}</p>
+                      <p className="text-xs text-muted-foreground">{et.duration} min</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={et.isActive !== false ? "default" : "secondary"}>
+                      {et.isActive !== false ? "Active" : "Inactive"}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate(`/event-types/${et.id}`)}
+                    >
+                      Edit
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              <Separator />
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">No event types created yet.</p>
+          )}
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => navigate("/event-types/new")}
+            data-testid="button-create-event-type"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Create New Event Type
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* F13 R8: Danger Zone */}
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <AlertTriangle className="h-5 w-5" />
+            Danger Zone
+          </CardTitle>
+          <CardDescription>Irreversible actions for your account</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium">Delete Account</p>
+              <p className="text-sm text-muted-foreground">Permanently delete your account and all data</p>
+            </div>
+            <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="destructive" data-testid="button-delete-account">
+                  Delete Account
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Delete Account</DialogTitle>
+                  <DialogDescription>
+                    This action cannot be undone. This will permanently delete your account, all event types, bookings, leads, and meeting briefs.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3">
+                    <p className="text-sm text-destructive font-medium">Warning: All your data will be permanently deleted.</p>
+                  </div>
+                  <div>
+                    <Label htmlFor="delete-password" className="text-sm font-medium mb-2 block">
+                      Enter your password to confirm
+                    </Label>
+                    <Input
+                      id="delete-password"
+                      type="password"
+                      value={deletePassword}
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      placeholder="Your password"
+                      data-testid="input-delete-password"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => deleteAccountMutation.mutate()}
+                    disabled={deleteAccountMutation.isPending || !deletePassword}
+                    data-testid="button-confirm-delete"
+                  >
+                    {deleteAccountMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                    Delete My Account
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </CardContent>
       </Card>

@@ -3,20 +3,21 @@
 **Date:** January 28, 2026
 **Auditor:** Claude (automated audit)
 **Scope:** Full feature-by-feature comparison of the CalendAI codebase against the v1.0 PRD
-**Last Updated:** Post-F12 implementation
+**Last Updated:** Post-F13 implementation
 
 ---
 
 ## Executive Summary
 
-The CalendAI codebase has matured significantly through ten feature implementation cycles (F01–F10). Core authentication, Google Calendar integration, AI-assisted availability setup, AI-assisted event type creation, booking page enhancements, date/time selection improvements, conversational pre-qualification enhancements, lead enrichment with scoring, email notifications, and dashboard enhancements are now implemented. The booking flow works end-to-end with real calendar integration, AI-powered pre-qualification with document upload and summary cards, automatic lead enrichment and scoring, meeting briefs, AI-guided event type creation with website scanning and branding extraction, email notifications for bookings, cancellations, and auth flows, and a comprehensive booking management dashboard with filtering, sorting, calendar view, and status management.
+The CalendAI codebase has matured significantly through thirteen feature implementation cycles (F01–F13). All MVP features are now implemented: authentication, Google Calendar integration, AI-assisted availability setup, AI-assisted event type creation, booking page enhancements, date/time selection, conversational pre-qualification, lead enrichment with scoring, email notifications, dashboard enhancements, meeting prep briefs, reschedule & cancel, and settings & configuration. The booking flow works end-to-end with real calendar integration, AI-powered pre-qualification with document upload and summary cards, automatic lead enrichment and scoring, meeting briefs, AI-guided event type creation with website scanning and branding extraction, email notifications for all booking lifecycle events, a comprehensive booking management dashboard, and a full-featured settings page with profile editing, password management, branding configuration, and account management.
 
-**Overall PRD Coverage: ~93%** of MVP requirements are implemented.
+**Overall PRD Coverage: ~96%** of MVP requirements are implemented.
 
 **Key Achievements Since Last Audit:**
-- Meeting prep brief enhancements: automatic generation 1hr before meeting, email delivery, similar booking context, regeneration with force flag, document analysis, read tracking, 108 tests (F11)
-- Reschedule & cancel: public cancel page with reason capture, public reschedule page with date/time picker, host reschedule from dashboard, reschedule email templates (3 new), cancellation reason on host cancel, minimum notice period warnings, Google Calendar delete+create on reschedule, meeting brief deletion on reschedule, confirmation page reschedule/cancel links, 409 conflict handling (F12)
-- Testing infrastructure expanded (Vitest with 421+ backend tests across 10 suites)
+- Settings & configuration: editable profile (name, email, company, website, timezone, photo), password change with strength validation, user-level branding defaults (logo, primary/secondary colors) with cascade to booking pages, event type quick-access with active/inactive toggles, account deletion with cascade delete across all 13 tables, danger zone with confirmation dialog (F13)
+- Branding cascade: event-type > user-default > system-default hierarchy applied to public booking pages via `getEventTypeBySlugWithHost()`
+- Security: URL scheme validation on image fields, hex color format validation, field whitelisting on profile update, password verification on account deletion
+- Testing infrastructure expanded (Vitest with 596 backend tests across 11 suites, 41 new F13 tests)
 
 **Previous Audit Achievements (F01-F10):**
 - Full email-based authentication with Google OAuth, magic links, and password reset (F01)
@@ -238,15 +239,23 @@ The CalendAI codebase has matured significantly through ten feature implementati
 
 ---
 
-### F13: Settings & Configuration — ~45% Partial
+### F13: Settings & Configuration — ~95% Complete ✅
 
 | Requirement | Status | Notes |
 |---|---|---|
-| Calendar connection | IMPLEMENTED | Connect/disconnect Google Calendar |
-| Availability rules | IMPLEMENTED | Full weekly editor in settings |
-| Profile display | PARTIAL | Read-only, no editing |
-| Branding settings | MISSING | Only on event types, not global |
-| Notification preferences | IMPLEMENTED | Per-type toggles (new booking, cancellation, meeting brief, daily digest) with API and UI (F09) |
+| R1: Profile editing | IMPLEMENTED | Editable first/last name, email, company, website, timezone, profile photo upload |
+| R2: Timezone configuration | IMPLEMENTED | IANA timezone dropdown with auto-detect, validates via `isValidTimezone()` |
+| R3: Password change | IMPLEMENTED | Current password verification via bcrypt, new password strength validation, OAuth user handling |
+| R4: Availability configuration | IMPLEMENTED | Full weekly editor, min notice, max advance, timezone (from F03) |
+| R5: Notification preferences | IMPLEMENTED | Per-type toggles (new booking, cancellation, meeting brief, daily digest) with API and UI (F09) |
+| R6: Branding settings | IMPLEMENTED | User-level default logo, primary/secondary color pickers, cascade to event types without overrides |
+| R7: Event type management | IMPLEMENTED | Quick-access list with active/inactive toggles, edit links, create new button |
+| R8: Account danger zone | IMPLEMENTED | Account deletion with password confirmation, cascade delete across all 13 tables, session destruction |
+| Calendar connection | IMPLEMENTED | Connect/disconnect Google Calendar (from F02) |
+
+**Additional achievements:** `PasswordStrengthIndicator` extracted to shared component for reuse across auth and settings. URL scheme validation on image fields (rejects `javascript:`, `data:`, `vbscript:` schemes). Hex color format validation. Profile field whitelisting prevents `id`, `password`, `emailVerified` injection. 41 new Vitest tests covering validation, branding cascade, cascade delete ordering, and edge cases.
+
+**Remaining Gap:** Email change does not trigger re-verification (future hardening). Password change does not invalidate other sessions (optional per brief). No rate limiting on password change or account deletion endpoints.
 
 ---
 
@@ -254,7 +263,7 @@ The CalendAI codebase has matured significantly through ten feature implementati
 
 | PRD Model | DB Table | Status | Missing Fields |
 |---|---|---|---|
-| User | `users` | PARTIAL | Missing: `timezone`, `companyName`, `websiteUrl` |
+| User | `users` | **COMPLETE** | All fields: `companyName`, `websiteUrl`, `timezone`, `defaultLogo`, `defaultPrimaryColor`, `defaultSecondaryColor` added in F13 |
 | Event Type | `event_types` | **COMPLETE** | All fields implemented including `location`, `logo`, `primaryColor`, `secondaryColor`, `questions` |
 | Booking | `bookings` | **COMPLETE** | `guestPhone` (F07), `rescheduleToken`, `cancelToken` (F09), `cancellationReason` (F12) |
 | Lead Enrichment | `lead_enrichments` | **COMPLETE** | All fields implemented including `leadScore`, `leadScoreLabel`, `leadScoreReasoning` (added in F08) |
@@ -283,7 +292,7 @@ The CalendAI codebase has matured significantly through ten feature implementati
 | **F10:** Booking Dashboard | MVP | Complete | ~90% |
 | **F11:** Meeting Prep Brief | MVP | Complete | ~100% |
 | **F12:** Reschedule & Cancel | MVP | Complete | ~95% |
-| **F13:** Settings & Config | MVP | Partial | ~45% |
+| **F13:** Settings & Config | MVP | Complete | ~95% |
 
 ---
 
@@ -308,7 +317,7 @@ The CalendAI codebase has matured significantly through ten feature implementati
 | Component | Status |
 |---|---|
 | Test framework | Vitest (configured in `vitest.config.ts`) |
-| Backend tests | 421+ tests across 10 suites (website-scanner, ai-service, F05 booking page, F06 date/time, F07 prequal enhancements, F08 lead scoring, F09 email notifications, F10 dashboard enhancements, F11 meeting prep brief, F12 reschedule & cancel) |
+| Backend tests | 596 tests across 11 suites (website-scanner, ai-service, F05 booking page, F06 date/time, F07 prequal enhancements, F08 lead scoring, F09 email notifications, F10 dashboard enhancements, F11 meeting prep brief, F12 reschedule & cancel, F13 settings & configuration) |
 | Frontend tests | Not yet implemented |
 | CI/CD integration | Not configured |
 | Coverage reporting | `@vitest/coverage-v8` installed, not yet in CI |
