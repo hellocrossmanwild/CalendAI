@@ -244,6 +244,10 @@ export default function EventTypeFormPage() {
                         <Input
                           placeholder="discovery-call"
                           {...field}
+                          onChange={(e) => {
+                            const value = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+                            field.onChange(value);
+                          }}
                           data-testid="input-slug"
                         />
                       </div>
@@ -464,8 +468,8 @@ export default function EventTypeFormPage() {
                 const locationDetail = locationValue.includes(":") ? locationValue.substring(locationValue.indexOf(":") + 1) : "";
 
                 const handleTypeChange = (type: string) => {
-                  if (type === "" || type === "google-meet") {
-                    form.setValue("location", type);
+                  if (type === "none" || type === "google-meet") {
+                    form.setValue("location", type === "none" ? "" : type);
                   } else {
                     form.setValue("location", `${type}:`);
                   }
@@ -478,14 +482,14 @@ export default function EventTypeFormPage() {
                 return (
                   <>
                     <Select
-                      value={locationType}
+                      value={locationType || "none"}
                       onValueChange={handleTypeChange}
                     >
                       <SelectTrigger data-testid="select-location">
                         <SelectValue placeholder="Not specified" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="">Not specified</SelectItem>
+                        <SelectItem value="none">Not specified</SelectItem>
                         <SelectItem value="google-meet">
                           <div className="flex items-center gap-2">
                             <Video className="h-4 w-4" />
